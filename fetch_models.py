@@ -361,6 +361,7 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+    con.execute("DROP TABLE IF EXISTS modelsdev_provider_models")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS modelsdev_provider_models (
@@ -368,6 +369,7 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
             model_id            VARCHAR,
             slug_normalized     VARCHAR,
             model_name          VARCHAR,
+            cache_read          DOUBLE,
             fetched_at          TIMESTAMP
         );
         """
@@ -515,11 +517,13 @@ def load_modelsdev(con: duckdb.DuckDBPyConnection, catalog: dict[str, Any]) -> N
     for pid, p in providers.items():
         for mid, m in (p.get("models") or {}).items():
             slug_norm = normalize_slug(mid.split("/", 1)[-1] if "/" in mid else mid)
-            junction_rows.append((pid, mid, slug_norm, m.get("name"), fetched_at))
+            cost = m.get("cost") or {}
+            cache_read = cost.get("cache_read")
+            junction_rows.append((pid, mid, slug_norm, m.get("name"), cache_read, fetched_at))
     con.execute("DELETE FROM modelsdev_provider_models")
     if junction_rows:
         con.executemany(
-            "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 5) + ")",
+            "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 6) + ")",
             junction_rows,
         )
 
@@ -928,11 +932,22 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             a.modelsdev_reasoning,
             a.modelsdev_context_window,
             (
-                SELECT orp.headquarters
-                FROM openrouter_providers orp
-                WHERE orp.slug = a.modelsdev_provider_id
-                LIMIT 1
-            ) AS openrouter_hq
+                SELECT STRING_AGG(DISTINCT COALESCE(orp.headquarters, 'unknown'), ',')
+                FROM modelsdev_provider_models pm2
+                LEFT JOIN openrouter_providers orp ON orp.slug = pm2.provider_id
+                WHERE pm2.slug_normalized = a.slug
+                  AND pm2.cache_read IS NOT NULL
+                  AND pm2.cache_read != 0
+                  AND orp.headquarters IS NOT NULL
+            ) AS provider_hqs,
+            (
+                SELECT STRING_AGG(DISTINCT COALESCE(orp.headquarters, 'unknown'), ',')
+                FROM modelsdev_provider_models pm3
+                LEFT JOIN openrouter_providers orp ON orp.slug = pm3.provider_id
+                WHERE pm3.slug_normalized = a.slug
+                  AND pm3.cache_read IS NOT NULL
+                  AND pm3.cache_read != 0
+            ) AS provider_hqs_incl_unknown
         FROM models_enriched a
         LEFT JOIN modelsdev_providers p ON p.id = a.modelsdev_provider_id
         WHERE a.aa_agentic_index IS NOT NULL
@@ -977,7 +992,8 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             "tool_call": r[29],
             "reasoning": r[30],
             "context_window": r[31],
-            "openrouter_hq": r[32],
+            "provider_hqs": r[32] or "",
+            "provider_hqs_incl_unknown": r[33] or "",
         }
         for r in scatter_rows
     ]
@@ -1301,6 +1317,8 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
               AND a.price_1m_input_tokens IS NOT NULL
               AND a.price_1m_output_tokens IS NOT NULL
         )
+        AND pm.cache_read IS NOT NULL
+        AND pm.cache_read != 0
         GROUP BY pm.provider_id, p.name, p.doc_url, orp.headquarters, orp.datacenters, orp.domain
         ORDER BY open_weight_model_count DESC, p.name
         """
@@ -1599,6 +1617,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       <label class="filter-chip" data-loc="other" data-active="true">
         <input type="checkbox" checked> 🌍 Other
       </label>
+      <label class="filter-chip" data-loc="unknown" data-active="true">
+        <input type="checkbox" checked> ❓ Unknown
+      </label>
     </div>
     <div id="scatter-plot"></div>
     <p class="plot-note">Blended cost = <code>(7·cache + 2·input + 1·output)/10</code>. When a provider omits cache-hit pricing, the input price is used as an upper bound (cache hits are never more expensive than a regular input token). <strong>{len(scatter_data)} models shown</strong>: open-weight (via models.dev), with an Agentic Index score AND input + output pricing. Models without input or output pricing are excluded. Neuralwatt energy values in tooltips are measured when an AA model matches a NW model; otherwise the tooltip shows an <strong>estimated</strong> energy derived from the NW cost ↔ energy regression (see the Neuralwatt scatter below).</p>
@@ -1626,6 +1647,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     <span class="filter-chip" data-ploc="cn" data-active="true" tabindex="0">🇨🇳 China</span>
     <span class="filter-chip" data-ploc="sg" data-active="true" tabindex="0">🇸🇬 Singapore</span>
     <span class="filter-chip" data-ploc="other" data-active="true" tabindex="0">🌍 Other</span>
+    <span class="filter-chip" data-ploc="unknown" data-active="true" tabindex="0">❓ Unknown</span>
   </div>
   <div class="providers-grid" id="providers-grid">{''.join(provider_cards)}
   </div>
@@ -1769,13 +1791,21 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       const locFilters = {{
         US: document.querySelector('.filter-chip[data-loc="US"]').dataset.active === "true",
         CN: document.querySelector('.filter-chip[data-loc="CN"]').dataset.active === "true",
-        other: document.querySelector('.filter-chip[data-loc="other"]').dataset.active === "true"
+        other: document.querySelector('.filter-chip[data-loc="other"]').dataset.active === "true",
+        unknown: document.querySelector('.filter-chip[data-loc="unknown"]').dataset.active === "true"
       }};
       const locMatch = (d) => {{
-        const hq = d.openrouter_hq;
-        if (hq === "US") return locFilters.US;
-        if (hq === "CN") return locFilters.CN;
-        return locFilters.other;  // null/unknown/other countries
+        // provider_hqs is a comma-separated list of HQ country codes from
+        // providers that offer this model WITH non-zero cache_read pricing.
+        // "unknown" means no OpenRouter HQ data for any cache-read provider.
+        const hqs = (d.provider_hqs || "").split(",").filter(Boolean);
+        if (hqs.length === 0) return locFilters.unknown;
+        return hqs.some((hq) => {{
+          if (hq === "US") return locFilters.US;
+          if (hq === "CN") return locFilters.CN;
+          if (hq === "unknown") return locFilters.unknown;
+          return locFilters.other;
+        }});
       }};
       // Filter to models that have a value for BOTH metrics AND pass loc filter.
       const plotData = data.filter((d) => d[yMetric.field] != null && d[xMetric.field] != null && locMatch(d));
@@ -2036,6 +2066,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         if (hq === 'us') match = filters.us;
         else if (hq === 'cn') match = filters.cn;
         else if (hq === 'sg') match = filters.sg;
+        else if (hq === 'unknown') match = filters.unknown;
         else match = filters.other;
         card.style.display = match ? '' : 'none';
       }});
