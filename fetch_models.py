@@ -1810,6 +1810,21 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       // Filter to models that have a value for BOTH metrics AND pass loc filter.
       const plotData = data.filter((d) => d[yMetric.field] != null && d[xMetric.field] != null && locMatch(d));
 
+      // Pareto frontier: points that are not dominated (no other point is both
+      // further left AND higher). Sort by X ascending, keep points where Y is
+      // strictly greater than the max Y seen so far.
+      const paretoFrontier = plotData
+        .slice()
+        .sort((a, b) => a[xMetric.field] - b[xMetric.field])
+        .filter((d, i, arr) => {{
+          if (i === 0) return true;
+          let maxY = -Infinity;
+          for (let j = 0; j < i; j++) {{
+            if (arr[j][yMetric.field] > maxY) maxY = arr[j][yMetric.field];
+          }}
+          return d[yMetric.field] > maxY;
+        }});
+
       const plot = Plot.plot({{
         marginTop: 24, marginRight: 40, marginBottom: 64, marginLeft: 70,
         height: 560,
@@ -1832,6 +1847,18 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             stroke: "#0c1018", strokeWidth: 1.2,
             r: 8, opacity: 0.95,
           }}),
+          // Pareto frontier line.
+          ...(paretoFrontier.length >= 2 ? [Plot.line(paretoFrontier, {{
+            x: xMetric.field, y: yMetric.field,
+            stroke: "#f0b429", strokeWidth: 2, strokeDasharray: "6,3",
+            opacity: 0.7,
+          }})] : []),
+          // Pareto frontier dots (highlighted).
+          ...(paretoFrontier.length >= 2 ? [Plot.dot(paretoFrontier, {{
+            x: xMetric.field, y: yMetric.field,
+            fill: "#f0b429", stroke: "#0c1018", strokeWidth: 1.5,
+            r: 5, opacity: 0.9,
+          }})] : []),
           Plot.text(plotData, {{
             x: xMetric.field, y: yMetric.field,
             text: (d) => shortName(d.name),
