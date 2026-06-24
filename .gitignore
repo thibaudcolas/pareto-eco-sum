@@ -1,0 +1,7 @@
+.env
+
+# Generated data
+/data/
+/.venv/
+__pycache__/
+*.pyc
