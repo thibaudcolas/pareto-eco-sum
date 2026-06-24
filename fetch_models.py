@@ -69,6 +69,40 @@ MODELSDEV_LOGOS_BASE = "https://models.dev/logos"
 OPENROUTER_PROVIDERS_URL = "https://openrouter.ai/api/v1/providers"
 GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain="
 
+TENSORX_MODELS_URL = "https://tensorx.ai/models/"
+TENSORX_PROVIDER_ID = "tensorx"
+TENSORX_PROVIDER_NAME = "TensorX"
+TENSORX_DOC_URL = "https://docs.tensorx.ai/"
+TENSORX_DOMAIN = "tensorx.ai"
+TENSORX_HQ = "IE"
+TENSORX_DATACENTERS = "IE,FI"
+
+# Static model catalog scraped from https://tensorx.ai/models/ (server-rendered
+# HTML, no JSON API). Updated manually when the page changes.
+TENSORX_MODELS = [
+    {"slug": "glm-5-2", "input": 1.50, "cache_read": 0.38, "output": 4.50},
+    {"slug": "minimax-m3", "input": 0.40, "cache_read": 0.10, "output": 2.00},
+    {"slug": "deepseek-v4-pro", "input": 1.75, "cache_read": 0.44, "output": 3.50},
+    {"slug": "kimi-k2-6", "input": 1.00, "cache_read": 0.25, "output": 4.00},
+    {"slug": "kimi-k2-7-code", "input": 1.25, "cache_read": 0.31, "output": 4.50},
+    {"slug": "deepseek-v4-flash", "input": 0.15, "cache_read": 0.04, "output": 0.30},
+    {"slug": "glm-5-1", "input": 1.40, "cache_read": 0.35, "output": 4.40},
+    {"slug": "glm-5-turbo", "input": 1.20, "cache_read": 0.30, "output": 4.00},
+    {"slug": "glm-5", "input": 1.00, "cache_read": 0.25, "output": 3.20},
+    {"slug": "kimi-k2-5", "input": 0.50, "cache_read": 0.13, "output": 2.80},
+    {"slug": "glm-4-7", "input": 0.60, "cache_read": 0.15, "output": 2.20},
+    {"slug": "minimax-m2-5", "input": 0.30, "cache_read": 0.08, "output": 1.20},
+    {"slug": "qwen3-5-122b-a10b", "input": 0.50, "cache_read": 0.13, "output": 3.50},
+    {"slug": "nemotron-3-super-120b-a12b", "input": 0.30, "cache_read": 0.08, "output": 0.90},
+    {"slug": "qwen3-5-9b", "input": 0.15, "cache_read": 0.04, "output": 0.20},
+    {"slug": "deepseek-v3-2", "input": 0.30, "cache_read": 0.08, "output": 0.50},
+    {"slug": "gpt-oss-120b", "input": 0.04, "cache_read": 0.01, "output": 0.20},
+    {"slug": "deepseek-chat-v3-1", "input": 0.20, "cache_read": 0.05, "output": 0.80},
+    {"slug": "deepseek-r1-0528", "input": 0.66, "cache_read": 0.17, "output": 2.60},
+    {"slug": "qwen3-235b-a22b-2507", "input": 0.07, "cache_read": 0.02, "output": 0.46},
+    {"slug": "qwen3-coder-30b-a3b-instruct", "input": 0.06, "cache_read": 0.02, "output": 0.25},
+]
+
 CACHE_TTL_SECONDS = 24 * 3600
 REQUEST_TIMEOUT = 30.0
 SAMPLE_FILE = SCRIPT_DIR / "sample.json"
@@ -389,6 +423,60 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tensorx_models (
+            slug                VARCHAR,
+            input_per_million   DOUBLE,
+            cache_read_per_million DOUBLE,
+            output_per_million  DOUBLE,
+            fetched_at          TIMESTAMP
+        );
+        """
+    )
+
+
+def load_tensorx(con: duckdb.DuckDBPyConnection) -> None:
+    """Load TensorX as a provider and inject its model links into the junction.
+
+    TensorX is a provider not in models.dev or OpenRouter (IE HQ, IE + FI DCs).
+    We register it as a models.dev provider and add its links to the junction
+    table so it appears in the providers section and model card provider lists.
+    """
+    fetched_at = datetime.now(timezone.utc)
+    con.execute("DELETE FROM tensorx_models")
+    con.executemany(
+        "INSERT INTO tensorx_models VALUES (" + ", ".join(["?"] * 5) + ")",
+        [(m["slug"], m["input"], m["cache_read"], m["output"], fetched_at) for m in TENSORX_MODELS],
+    )
+    # Register TensorX as a provider in modelsdev_providers (upsert).
+    con.execute(
+        "DELETE FROM modelsdev_providers WHERE id = ?",
+        (TENSORX_PROVIDER_ID,),
+    )
+    con.execute(
+        "INSERT INTO modelsdev_providers VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (TENSORX_PROVIDER_ID, TENSORX_PROVIDER_NAME, TENSORX_MODELS_URL,
+         TENSORX_DOC_URL, None, "", fetched_at),
+    )
+    # Register TensorX in OpenRouter providers (upsert) for HQ/DC flags.
+    con.execute(
+        "DELETE FROM openrouter_providers WHERE slug = ?",
+        (TENSORX_PROVIDER_ID,),
+    )
+    con.execute(
+        "INSERT INTO openrouter_providers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (TENSORX_PROVIDER_ID, TENSORX_PROVIDER_NAME, TENSORX_HQ,
+         TENSORX_DATACENTERS, None, None, None, TENSORX_DOMAIN, fetched_at),
+    )
+    # Inject TensorX model links into the junction table.
+    con.execute("DELETE FROM modelsdev_provider_models WHERE provider_id = ?", (TENSORX_PROVIDER_ID,))
+    con.executemany(
+        "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 6) + ")",
+        [(TENSORX_PROVIDER_ID, m["slug"], m["slug"], m["slug"], m["cache_read"] if m.get("cache_read") else None, fetched_at)
+         for m in TENSORX_MODELS],
+    )
+    print(f"Loaded TensorX provider ({len(TENSORX_MODELS)} models, HQ={TENSORX_HQ}, DCs={TENSORX_DATACENTERS})")
 
 
 def load_aa_models(
@@ -947,7 +1035,14 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
                 WHERE pm3.slug_normalized = a.slug
                   AND pm3.cache_read IS NOT NULL
                   AND pm3.cache_read != 0
-            ) AS provider_hqs_incl_unknown
+            ) AS provider_hqs_incl_unknown,
+            (
+                SELECT COUNT(*) > 0
+                FROM modelsdev_provider_models pm4
+                WHERE pm4.slug_normalized = a.slug
+                  AND pm4.cache_read IS NOT NULL
+                  AND pm4.cache_read != 0
+            ) AS has_cache_priced_provider
         FROM models_enriched a
         LEFT JOIN modelsdev_providers p ON p.id = a.modelsdev_provider_id
         WHERE a.aa_agentic_index IS NOT NULL
@@ -994,6 +1089,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             "context_window": r[31],
             "provider_hqs": r[32] or "",
             "provider_hqs_incl_unknown": r[33] or "",
+            "has_cache_priced_provider": bool(r[34]) if r[34] is not None else False,
         }
         for r in scatter_rows
     ]
@@ -1305,7 +1401,8 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT pm.slug_normalized) AS open_weight_model_count,
             orp.headquarters,
             orp.datacenters,
-            orp.domain AS or_domain
+            orp.domain AS or_domain,
+            MAX(CASE WHEN pm.cache_read IS NOT NULL AND pm.cache_read != 0 THEN 1 ELSE 0 END) AS has_cache_read
         FROM modelsdev_provider_models pm
         INNER JOIN modelsdev_providers p ON p.id = pm.provider_id
         LEFT JOIN openrouter_providers orp ON orp.slug = pm.provider_id
@@ -1317,14 +1414,12 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
               AND a.price_1m_input_tokens IS NOT NULL
               AND a.price_1m_output_tokens IS NOT NULL
         )
-        AND pm.cache_read IS NOT NULL
-        AND pm.cache_read != 0
         GROUP BY pm.provider_id, p.name, p.doc_url, orp.headquarters, orp.datacenters, orp.domain
         ORDER BY open_weight_model_count DESC, p.name
         """
     ).fetchall()
     provider_cards: list[str] = []
-    for pid, pname, doc_url, count, hq, dcs, or_domain in provider_section_rows:
+    for pid, pname, doc_url, count, hq, dcs, or_domain, has_cache_read in provider_section_rows:
         color = color_map.get(pid) or color_map.get(pname) or "#5b8def"
 
         # Derive a domain for the favicon: prefer OpenRouter-derived domain,
@@ -1373,8 +1468,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         link = f'href="{escape(doc_url)}"' if doc_url else ""
         tag = "a" if doc_url else "span"
         hq_attr = hq or "unknown"
+        cache_attr = "priced" if has_cache_read else "all"
         provider_cards.append(
-            f'<{tag} class="provider-card" data-hq="{escape(hq_attr.lower())}" {link} target="_blank" rel="noopener" '
+            f'<{tag} class="provider-card" data-hq="{escape(hq_attr.lower())}" data-cache="{cache_attr}" {link} target="_blank" rel="noopener" '
             f'style="border-color: {color}33;">'
             f'<span class="provider-card-logo" style="background: {color}20;">{logo_html}</span>'
             f'<span class="provider-card-info">'
@@ -1617,8 +1713,20 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       <label class="filter-chip" data-loc="other" data-active="true">
         <input type="checkbox" checked> 🌍 Other
       </label>
+      <label class="filter-chip" data-loc="IE" data-active="true">
+        <input type="checkbox" checked> 🇮🇪 Ireland
+      </label>
       <label class="filter-chip" data-loc="unknown" data-active="true">
         <input type="checkbox" checked> ❓ Unknown
+      </label>
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">KV cache</span>
+      <label class="filter-chip" data-kv="priced" data-active="true">
+        <input type="checkbox" checked> 💰 Priced
+      </label>
+      <label class="filter-chip" data-kv="all" data-active="true">
+        <input type="checkbox" checked> All
       </label>
     </div>
     <div id="scatter-plot"></div>
@@ -1646,8 +1754,12 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     <span class="filter-chip" data-ploc="us" data-active="true" tabindex="0">🇺🇸 US</span>
     <span class="filter-chip" data-ploc="cn" data-active="true" tabindex="0">🇨🇳 China</span>
     <span class="filter-chip" data-ploc="sg" data-active="true" tabindex="0">🇸🇬 Singapore</span>
+    <span class="filter-chip" data-ploc="ie" data-active="true" tabindex="0">🇮🇪 Ireland</span>
     <span class="filter-chip" data-ploc="other" data-active="true" tabindex="0">🌍 Other</span>
     <span class="filter-chip" data-ploc="unknown" data-active="true" tabindex="0">❓ Unknown</span>
+    <span class="controls-label" style="margin-left:1rem">KV cache</span>
+    <span class="filter-chip" data-cache="priced" data-active="true" tabindex="0">💰 Priced</span>
+    <span class="filter-chip" data-cache="all" data-active="true" tabindex="0">All</span>
   </div>
   <div class="providers-grid" id="providers-grid">{''.join(provider_cards)}
   </div>
@@ -1791,18 +1903,25 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       const locFilters = {{
         US: document.querySelector('.filter-chip[data-loc="US"]').dataset.active === "true",
         CN: document.querySelector('.filter-chip[data-loc="CN"]').dataset.active === "true",
+        IE: document.querySelector('.filter-chip[data-loc="IE"]').dataset.active === "true",
         other: document.querySelector('.filter-chip[data-loc="other"]').dataset.active === "true",
         unknown: document.querySelector('.filter-chip[data-loc="unknown"]').dataset.active === "true"
       }};
       const locMatch = (d) => {{
-        // provider_hqs is a comma-separated list of HQ country codes from
-        // providers that offer this model WITH non-zero cache_read pricing.
-        // "unknown" means no OpenRouter HQ data for any cache-read provider.
+        // KV cache filter: if "Priced" is off and this model has cache-priced
+        // providers, hide it. If "All" is off and this model has NO cache-priced
+        // providers, hide it.
+        const kvPriced = document.querySelector('.filter-chip[data-kv="priced"]').dataset.active === "true";
+        const kvAll = document.querySelector('.filter-chip[data-kv="all"]').dataset.active === "true";
+        if (d.has_cache_priced_provider && !kvPriced) return false;
+        if (!d.has_cache_priced_provider && !kvAll) return false;
+        // Location filter.
         const hqs = (d.provider_hqs || "").split(",").filter(Boolean);
         if (hqs.length === 0) return locFilters.unknown;
         return hqs.some((hq) => {{
           if (hq === "US") return locFilters.US;
           if (hq === "CN") return locFilters.CN;
+          if (hq === "IE") return locFilters.IE;
           if (hq === "unknown") return locFilters.unknown;
           return locFilters.other;
         }});
@@ -2084,17 +2203,25 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
   (function () {{
     function applyProviderFilters() {{
       var filters = {{}};
-      document.querySelectorAll('#provider-filters .filter-chip').forEach(function (c) {{
+      document.querySelectorAll('#provider-filters .filter-chip[data-ploc]').forEach(function (c) {{
         filters[c.dataset.ploc] = c.dataset.active === 'true';
       }});
+      var cachePriced = document.querySelector('#provider-filters .filter-chip[data-cache=priced]').dataset.active === 'true';
+      var cacheAll = document.querySelector('#provider-filters .filter-chip[data-cache=all]').dataset.active === 'true';
       document.querySelectorAll('#providers-grid .provider-card').forEach(function (card) {{
         var hq = card.dataset.hq || 'unknown';
         var match;
         if (hq === 'us') match = filters.us;
         else if (hq === 'cn') match = filters.cn;
         else if (hq === 'sg') match = filters.sg;
+        else if (hq === 'ie') match = filters.ie;
         else if (hq === 'unknown') match = filters.unknown;
         else match = filters.other;
+        if (match) {{
+          var cache = card.dataset.cache;
+          if (cache === 'priced' && !cachePriced) match = false;
+          if (cache === 'all' && !cacheAll) match = false;
+        }}
         card.style.display = match ? '' : 'none';
       }});
     }}
@@ -2193,6 +2320,13 @@ def main() -> int:
             load_openrouter_providers(con, or_payload)
         except Exception as exc:
             print(f"WARN: OpenRouter providers step failed: {exc}", file=sys.stderr)
+
+    # 3d. TensorX — load static catalog (IE HQ, IE + FI DCs).
+    if not args.no_modelsdev:
+        try:
+            load_tensorx(con)
+        except Exception as exc:
+            print(f"WARN: TensorX load failed: {exc}", file=sys.stderr)
 
     # 4. Top 10 demo (console + HTML)
     print_top10_agentic(con)
