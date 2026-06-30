@@ -35,7 +35,7 @@ This is distinct from the blended cost per 1M tokens: cost-per-task includes the
 
 ### Motivation
 
-Neuralwatt provides measured energy per request for 12 models at the 16k–64k prompt-size band. To estimate energy for the other ~8 open-weight models in our dataset, we derive a linear regression from Neuralwatt's own data.
+Neuralwatt provides measured energy per request for a small set of models at the 16k–64k prompt-size band. To estimate energy for open-weight models that don't have a direct Neuralwatt match, we derive a linear regression from Neuralwatt's own data.
 
 ### Data selection
 

@@ -62,8 +62,8 @@ ORDER BY aa_agentic_index DESC
 LIMIT 10;
 ```
 
-| agentic | name | creator | coding |
-|--------:|------|---------|------:|
+| name | creator | agentic | coding |
+|------|---------|--------:|-------:|
 | 43.10 | GLM-5.2 (max) | Z AI | 68.8 |
 | 36.40 | DeepSeek V4 Pro (Reasoning, Max Effort) | DeepSeek | 59.4 |
 | 35.40 | MiniMax-M3 | MiniMax | 58.6 |

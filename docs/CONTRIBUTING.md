@@ -1,6 +1,6 @@
 # Contributing / Maintenance Guide
 
-This document flaggs things to watch for when maintaining the Pareto eco sum project. Most of the code is in two self-contained Python scripts with inline PEP 723 metadata — no build system, no package.json.
+This document flags things to watch for when maintaining the Pareto eco sum project. Most of the code is in two self-contained Python scripts with inline PEP 723 metadata — no build system, no package.json.
 
 ## When to update
 
@@ -51,7 +51,7 @@ The HTML report has two inline `<script>` blocks:
 1. **AA scatter plot** (Observable Plot): X/Y axis switchers, location filter, custom DOM tooltips. The `render()` function filters data on both metrics and location. If you add metrics, extend `METRICS` / `X_METRICS` registries in the JS.
 2. **NW scatter plot**: regression line, variant vs base dots, custom tooltips.
 
-Both use a shared `.tooltip-popup` CSS class. There are two tooltip elements in the DOM (one per script block) — they're独立 selected by `document.querySelectorAll('.tooltip-popup')[0]` and `[1]`.
+Both use a shared `.tooltip-popup` CSS class. There are two tooltip elements in the DOM (one per script block) — they're independently selected by `document.querySelectorAll('.tooltip-popup')[0]` and `[1]`.
 
 ### Cached data
 

@@ -13,10 +13,10 @@ This project fetches, cross-references, and visualizes data about open-weight la
 
 All data is stored in a single DuckDB file (`data/pareto.duckdb`) and rendered into an interactive HTML report (`data/index.html`) with:
 
-- **Scatter plot** of 20 open-weight models (X: blended cost or energy, Y: Agentic/Coding/Intelligence index) with Observable Plot, provider-colored dots, hover tooltips, and US/China/Other location filters.
-- **Neuralwatt scatter plot** of 12 models (X: NW blended cost, Y: energy per request at 16k–64k band) with a linear regression line and correlation statistics.
-- **Model cards** for all 20 open-weight models with provider logos, capability chips (reasoning, tool calling, modalities, context window), Neuralwatt energy badges, and links to every provider offering the model.
-- **Providers section** listing 73 providers that offer open-weight models, with Google favicon logos, headquarters/datacenter flags, and model counts.
+- **Scatter plot** of open-weight models that pass the filters (X: blended cost or energy, Y: Agentic/Coding/Intelligence index) with Observable Plot, provider-colored dots, hover tooltips, and US/China/Other location filters.
+- **Neuralwatt scatter plot** of the available Neuralwatt models (X: NW blended cost, Y: energy per request at 16k–64k band) with a linear regression line and correlation statistics.
+- **Model cards** for the same open-weight models with provider logos, capability chips (reasoning, tool calling, modalities, context window), Neuralwatt energy badges, and links to every provider offering the model.
+- **Providers section** listing providers that offer those open-weight models, with Google favicon logos, headquarters/datacenter flags, and model counts.
 
 ## Tech stack
 
