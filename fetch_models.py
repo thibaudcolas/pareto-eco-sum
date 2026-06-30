@@ -1713,9 +1713,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       <label class="filter-chip" data-loc="other" data-active="true">
         <input type="checkbox" checked> 🌍 Other
       </label>
-      <label class="filter-chip" data-loc="IE" data-active="true">
-        <input type="checkbox" checked> 🇮🇪 Ireland
-      </label>
       <label class="filter-chip" data-loc="unknown" data-active="true">
         <input type="checkbox" checked> ❓ Unknown
       </label>
@@ -1726,7 +1723,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         <input type="checkbox" checked> 💰 Priced
       </label>
       <label class="filter-chip" data-kv="all" data-active="true">
-        <input type="checkbox" checked> All
+        <input type="checkbox" checked> ❌ Not priced
       </label>
     </div>
     <div id="scatter-plot"></div>
@@ -1754,12 +1751,11 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     <span class="filter-chip" data-ploc="us" data-active="true" tabindex="0">🇺🇸 US</span>
     <span class="filter-chip" data-ploc="cn" data-active="true" tabindex="0">🇨🇳 China</span>
     <span class="filter-chip" data-ploc="sg" data-active="true" tabindex="0">🇸🇬 Singapore</span>
-    <span class="filter-chip" data-ploc="ie" data-active="true" tabindex="0">🇮🇪 Ireland</span>
     <span class="filter-chip" data-ploc="other" data-active="true" tabindex="0">🌍 Other</span>
     <span class="filter-chip" data-ploc="unknown" data-active="true" tabindex="0">❓ Unknown</span>
     <span class="controls-label" style="margin-left:1rem">KV cache</span>
     <span class="filter-chip" data-cache="priced" data-active="true" tabindex="0">💰 Priced</span>
-    <span class="filter-chip" data-cache="all" data-active="true" tabindex="0">All</span>
+    <span class="filter-chip" data-cache="all" data-active="true" tabindex="0">❌ Not priced</span>
   </div>
   <div class="providers-grid" id="providers-grid">{''.join(provider_cards)}
   </div>
@@ -1903,13 +1899,12 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       const locFilters = {{
         US: document.querySelector('.filter-chip[data-loc="US"]').dataset.active === "true",
         CN: document.querySelector('.filter-chip[data-loc="CN"]').dataset.active === "true",
-        IE: document.querySelector('.filter-chip[data-loc="IE"]').dataset.active === "true",
         other: document.querySelector('.filter-chip[data-loc="other"]').dataset.active === "true",
         unknown: document.querySelector('.filter-chip[data-loc="unknown"]').dataset.active === "true"
       }};
       const locMatch = (d) => {{
         // KV cache filter: if "Priced" is off and this model has cache-priced
-        // providers, hide it. If "All" is off and this model has NO cache-priced
+        // providers, hide it. If "Not priced" is off and this model has NO cache-priced
         // providers, hide it.
         const kvPriced = document.querySelector('.filter-chip[data-kv="priced"]').dataset.active === "true";
         const kvAll = document.querySelector('.filter-chip[data-kv="all"]').dataset.active === "true";
@@ -1921,7 +1916,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         return hqs.some((hq) => {{
           if (hq === "US") return locFilters.US;
           if (hq === "CN") return locFilters.CN;
-          if (hq === "IE") return locFilters.IE;
           if (hq === "unknown") return locFilters.unknown;
           return locFilters.other;
         }});
@@ -2130,20 +2124,14 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         grid: true,
       }},
       marks: [
-        // Base model dots (solid fill).
-        Plot.dot(nwData.filter(d => !d.is_variant), {{
+        // All model dots: base models are solid/large, variants are hollow/smaller.
+        Plot.dot(nwData, {{
           x: "blended_cost", y: "energy_mwh",
           fill: (d) => colorFor(d.provider || d.name),
-          stroke: "#0c1018", strokeWidth: 1.2,
-          r: 8, opacity: 0.95,
-        }}),
-        // Variant dots (hollow / lighter).
-        Plot.dot(nwData.filter(d => d.is_variant), {{
-          x: "blended_cost", y: "energy_mwh",
-          fill: (d) => colorFor(d.provider || d.name),
-          fillOpacity: 0.3,
-          stroke: (d) => colorFor(d.provider || d.name), strokeWidth: 1.5,
-          r: 6,
+          fillOpacity: (d) => d.is_variant ? 0.3 : 0.95,
+          stroke: (d) => colorFor(d.provider || d.name),
+          strokeWidth: (d) => d.is_variant ? 1.5 : 1.2,
+          r: (d) => d.is_variant ? 6 : 8,
         }}),
         // Regression line.
         ...(regressionLine.length ? [Plot.line(regressionLine, {{
@@ -2214,7 +2202,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         if (hq === 'us') match = filters.us;
         else if (hq === 'cn') match = filters.cn;
         else if (hq === 'sg') match = filters.sg;
-        else if (hq === 'ie') match = filters.ie;
         else if (hq === 'unknown') match = filters.unknown;
         else match = filters.other;
         if (match) {{
