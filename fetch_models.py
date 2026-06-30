@@ -69,38 +69,85 @@ MODELSDEV_LOGOS_BASE = "https://models.dev/logos"
 OPENROUTER_PROVIDERS_URL = "https://openrouter.ai/api/v1/providers"
 GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain="
 
-TENSORX_MODELS_URL = "https://tensorx.ai/models/"
-TENSORX_PROVIDER_ID = "tensorx"
-TENSORX_PROVIDER_NAME = "TensorX"
-TENSORX_DOC_URL = "https://docs.tensorx.ai/"
-TENSORX_DOMAIN = "tensorx.ai"
-TENSORX_HQ = "IE"
-TENSORX_DATACENTERS = "IE,FI"
+# --------------------------------------------------------------------------- #
+# Provider overrides
+# --------------------------------------------------------------------------- #
+#
+# A generic mechanism for adding providers not covered by models.dev /
+# OpenRouter, or overriding fields (headquarters, datacenters, ...) on
+# providers that are. Each entry is a dict:
+#
+#   id            provider slug (matches models.dev / OpenRouter if existing)
+#   name          display name
+#   headquarters  ISO 3166-1 alpha-2 country code (optional, overrides OpenRouter)
+#   datacenters   comma-separated ISO codes (optional, overrides OpenRouter)
+#   domain        site domain used for favicon (optional)
+#   doc_url       documentation URL (optional)
+#   api_base      API base URL (optional; defaults to doc_url)
+#   models        list of {slug, input, cache_read, output} in $/1M tokens
+#                 (optional; when present the model links are injected into the
+#                 models.dev provider↔model junction table)
+#
+# Existing provider rows are left untouched except for the fields listed above
+# (which are updated only when set, via ON CONFLICT … DO UPDATE).
 
-# Static model catalog scraped from https://tensorx.ai/models/ (server-rendered
-# HTML, no JSON API). Updated manually when the page changes.
-TENSORX_MODELS = [
-    {"slug": "glm-5-2", "input": 1.50, "cache_read": 0.38, "output": 4.50},
-    {"slug": "minimax-m3", "input": 0.40, "cache_read": 0.10, "output": 2.00},
-    {"slug": "deepseek-v4-pro", "input": 1.75, "cache_read": 0.44, "output": 3.50},
-    {"slug": "kimi-k2-6", "input": 1.00, "cache_read": 0.25, "output": 4.00},
-    {"slug": "kimi-k2-7-code", "input": 1.25, "cache_read": 0.31, "output": 4.50},
-    {"slug": "deepseek-v4-flash", "input": 0.15, "cache_read": 0.04, "output": 0.30},
-    {"slug": "glm-5-1", "input": 1.40, "cache_read": 0.35, "output": 4.40},
-    {"slug": "glm-5-turbo", "input": 1.20, "cache_read": 0.30, "output": 4.00},
-    {"slug": "glm-5", "input": 1.00, "cache_read": 0.25, "output": 3.20},
-    {"slug": "kimi-k2-5", "input": 0.50, "cache_read": 0.13, "output": 2.80},
-    {"slug": "glm-4-7", "input": 0.60, "cache_read": 0.15, "output": 2.20},
-    {"slug": "minimax-m2-5", "input": 0.30, "cache_read": 0.08, "output": 1.20},
-    {"slug": "qwen3-5-122b-a10b", "input": 0.50, "cache_read": 0.13, "output": 3.50},
-    {"slug": "nemotron-3-super-120b-a12b", "input": 0.30, "cache_read": 0.08, "output": 0.90},
-    {"slug": "qwen3-5-9b", "input": 0.15, "cache_read": 0.04, "output": 0.20},
-    {"slug": "deepseek-v3-2", "input": 0.30, "cache_read": 0.08, "output": 0.50},
-    {"slug": "gpt-oss-120b", "input": 0.04, "cache_read": 0.01, "output": 0.20},
-    {"slug": "deepseek-chat-v3-1", "input": 0.20, "cache_read": 0.05, "output": 0.80},
-    {"slug": "deepseek-r1-0528", "input": 0.66, "cache_read": 0.17, "output": 2.60},
-    {"slug": "qwen3-235b-a22b-2507", "input": 0.07, "cache_read": 0.02, "output": 0.46},
-    {"slug": "qwen3-coder-30b-a3b-instruct", "input": 0.06, "cache_read": 0.02, "output": 0.25},
+PROVIDER_OVERRIDES: list[dict[str, Any]] = [
+    # Scaleway is in models.dev but not in OpenRouter, so it has no HQ/DC
+    # location data. Pin it to FR (HQ + DC).
+    {
+        "id": "scaleway",
+        "name": "Scaleway",
+        "headquarters": "FR",
+        "datacenters": "FR",
+    },
+    # TensorX is not in models.dev or OpenRouter. IE HQ, IE + FI DCs.
+    # Static model catalog scraped from https://tensorx.ai/models/ (server-
+    # rendered HTML, no JSON API). Updated manually when the page changes.
+    {
+        "id": "tensorx",
+        "name": "TensorX",
+        "headquarters": "IE",
+        "datacenters": "IE,FI",
+        "domain": "tensorx.ai",
+        "doc_url": "https://docs.tensorx.ai/",
+        "api_base": "https://tensorx.ai/models/",
+        "models": [
+            {"slug": "glm-5-2", "input": 1.50, "cache_read": 0.38, "output": 4.50},
+            {"slug": "minimax-m3", "input": 0.40, "cache_read": 0.10, "output": 2.00},
+            {"slug": "deepseek-v4-pro", "input": 1.75, "cache_read": 0.44, "output": 3.50},
+            {"slug": "kimi-k2-6", "input": 1.00, "cache_read": 0.25, "output": 4.00},
+            {"slug": "kimi-k2-7-code", "input": 1.25, "cache_read": 0.31, "output": 4.50},
+            {"slug": "deepseek-v4-flash", "input": 0.15, "cache_read": 0.04, "output": 0.30},
+            {"slug": "glm-5-1", "input": 1.40, "cache_read": 0.35, "output": 4.40},
+            {"slug": "glm-5-turbo", "input": 1.20, "cache_read": 0.30, "output": 4.00},
+            {"slug": "glm-5", "input": 1.00, "cache_read": 0.25, "output": 3.20},
+            {"slug": "kimi-k2-5", "input": 0.50, "cache_read": 0.13, "output": 2.80},
+            {"slug": "glm-4-7", "input": 0.60, "cache_read": 0.15, "output": 2.20},
+            {"slug": "minimax-m2-5", "input": 0.30, "cache_read": 0.08, "output": 1.20},
+            {"slug": "qwen3-5-122b-a10b", "input": 0.50, "cache_read": 0.13, "output": 3.50},
+            {"slug": "nemotron-3-super-120b-a12b", "input": 0.30, "cache_read": 0.08, "output": 0.90},
+            {"slug": "qwen3-5-9b", "input": 0.15, "cache_read": 0.04, "output": 0.20},
+            {"slug": "deepseek-v3-2", "input": 0.30, "cache_read": 0.08, "output": 0.50},
+            {"slug": "gpt-oss-120b", "input": 0.04, "cache_read": 0.01, "output": 0.20},
+            {"slug": "deepseek-chat-v3-1", "input": 0.20, "cache_read": 0.05, "output": 0.80},
+            {"slug": "deepseek-r1-0528", "input": 0.66, "cache_read": 0.17, "output": 2.60},
+            {"slug": "qwen3-235b-a22b-2507", "input": 0.07, "cache_read": 0.02, "output": 0.46},
+            {"slug": "qwen3-coder-30b-a3b-instruct", "input": 0.06, "cache_read": 0.02, "output": 0.25},
+        ],
+    },
+    # ArgyllDev — https://argylldev.com/ — UK HQ + UK DC (ISO code GB).
+    # No cache pricing published; only serves MiniMax M2.7.
+    {
+        "id": "argylldev",
+        "name": "ArgyllDev",
+        "headquarters": "GB",
+        "datacenters": "GB",
+        "domain": "argylldev.com",
+        "doc_url": "https://argylldev.com/",
+        "models": [
+            {"slug": "minimax-m2-7", "input": 0.60, "cache_read": None, "output": 3.00},
+        ],
+    },
 ]
 
 CACHE_TTL_SECONDS = 24 * 3600
@@ -396,6 +443,8 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
         """
     )
     con.execute("DROP TABLE IF EXISTS modelsdev_provider_models")
+    # Legacy table from before the generic overrides refactor — drop if present.
+    con.execute("DROP TABLE IF EXISTS tensorx_models")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS modelsdev_provider_models (
@@ -423,60 +472,72 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tensorx_models (
-            slug                VARCHAR,
-            input_per_million   DOUBLE,
-            cache_read_per_million DOUBLE,
-            output_per_million  DOUBLE,
-            fetched_at          TIMESTAMP
-        );
-        """
-    )
+def load_provider_overrides(con: duckdb.DuckDBPyConnection) -> None:
+    """Apply provider overrides: add custom providers or override fields.
 
+    Each entry in ``PROVIDER_OVERRIDES`` is upserted into:
+      - ``modelsdev_providers`` (name / api_base / doc_url),
+      - ``openrouter_providers`` (name / headquarters / datacenters / domain),
+    so it appears in the providers section and model card provider lists.
+    When ``models`` is present, the override's model links replace the
+    provider's rows in the ``modelsdev_provider_models`` junction.
 
-def load_tensorx(con: duckdb.DuckDBPyConnection) -> None:
-    """Load TensorX as a provider and inject its model links into the junction.
-
-    TensorX is a provider not in models.dev or OpenRouter (IE HQ, IE + FI DCs).
-    We register it as a models.dev provider and add its links to the junction
-    table so it appears in the providers section and model card provider lists.
+    Upserts use ``ON CONFLICT DO UPDATE SET … = COALESCE(excluded, row)`` so
+    existing fields (e.g. Scaleway's privacy/terms URLs) are preserved when
+    the override does not specify them.
     """
     fetched_at = datetime.now(timezone.utc)
-    con.execute("DELETE FROM tensorx_models")
-    con.executemany(
-        "INSERT INTO tensorx_models VALUES (" + ", ".join(["?"] * 5) + ")",
-        [(m["slug"], m["input"], m["cache_read"], m["output"], fetched_at) for m in TENSORX_MODELS],
-    )
-    # Register TensorX as a provider in modelsdev_providers (upsert).
-    con.execute(
-        "DELETE FROM modelsdev_providers WHERE id = ?",
-        (TENSORX_PROVIDER_ID,),
-    )
-    con.execute(
-        "INSERT INTO modelsdev_providers VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (TENSORX_PROVIDER_ID, TENSORX_PROVIDER_NAME, TENSORX_MODELS_URL,
-         TENSORX_DOC_URL, None, "", fetched_at),
-    )
-    # Register TensorX in OpenRouter providers (upsert) for HQ/DC flags.
-    con.execute(
-        "DELETE FROM openrouter_providers WHERE slug = ?",
-        (TENSORX_PROVIDER_ID,),
-    )
-    con.execute(
-        "INSERT INTO openrouter_providers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (TENSORX_PROVIDER_ID, TENSORX_PROVIDER_NAME, TENSORX_HQ,
-         TENSORX_DATACENTERS, None, None, None, TENSORX_DOMAIN, fetched_at),
-    )
-    # Inject TensorX model links into the junction table.
-    con.execute("DELETE FROM modelsdev_provider_models WHERE provider_id = ?", (TENSORX_PROVIDER_ID,))
-    con.executemany(
-        "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 6) + ")",
-        [(TENSORX_PROVIDER_ID, m["slug"], m["slug"], m["slug"], m["cache_read"] if m.get("cache_read") else None, fetched_at)
-         for m in TENSORX_MODELS],
-    )
-    print(f"Loaded TensorX provider ({len(TENSORX_MODELS)} models, HQ={TENSORX_HQ}, DCs={TENSORX_DATACENTERS})")
+    for prov in PROVIDER_OVERRIDES:
+        pid = prov["id"]
+        pname = prov.get("name")
+        hq = prov.get("headquarters")
+        dcs = prov.get("datacenters")
+        domain = prov.get("domain")
+        doc_url = prov.get("doc_url")
+        api_base = prov.get("api_base") or doc_url
+        models = prov.get("models") or []
+
+        # modelsdev_providers upsert (id PK).
+        con.execute(
+            """
+            INSERT INTO modelsdev_providers VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                name     = COALESCE(excluded.name, modelsdev_providers.name),
+                api_base = COALESCE(excluded.api_base, modelsdev_providers.api_base),
+                doc_url  = COALESCE(excluded.doc_url, modelsdev_providers.doc_url),
+                npm_package = COALESCE(excluded.npm_package, modelsdev_providers.npm_package)
+            """,
+            (pid, pname, api_base, doc_url, None, "", fetched_at),
+        )
+        # openrouter_providers upsert (slug PK) — override HQ/DCs/name/domain.
+        con.execute(
+            """
+            INSERT INTO openrouter_providers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (slug) DO UPDATE SET
+                name          = COALESCE(excluded.name, openrouter_providers.name),
+                headquarters  = COALESCE(excluded.headquarters, openrouter_providers.headquarters),
+                datacenters   = COALESCE(excluded.datacenters, openrouter_providers.datacenters),
+                domain        = COALESCE(excluded.domain, openrouter_providers.domain)
+            """,
+            (pid, pname, hq, dcs, None, None, None, domain, fetched_at),
+        )
+        # Replace the override's model links in the junction table.
+        if models:
+            con.execute(
+                "DELETE FROM modelsdev_provider_models WHERE provider_id = ?",
+                (pid,),
+            )
+            con.executemany(
+                "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 6) + ")",
+                [(pid, m["slug"], m["slug"], m["slug"], m.get("cache_read"), fetched_at)
+                 for m in models],
+            )
+
+        models_hint = f", {len(models)} models" if models else ""
+        print(
+            f"Applied provider override: {pname} ({pid}) "
+            f"HQ={hq} DCs={dcs}{models_hint}"
+        )
 
 
 def load_aa_models(
@@ -2308,12 +2369,12 @@ def main() -> int:
         except Exception as exc:
             print(f"WARN: OpenRouter providers step failed: {exc}", file=sys.stderr)
 
-    # 3d. TensorX — load static catalog (IE HQ, IE + FI DCs).
+    # 3d. Provider overrides — Scaleway HQ/DC, TensorX, ArgyllDev, …
     if not args.no_modelsdev:
         try:
-            load_tensorx(con)
+            load_provider_overrides(con)
         except Exception as exc:
-            print(f"WARN: TensorX load failed: {exc}", file=sys.stderr)
+            print(f"WARN: Provider overrides load failed: {exc}", file=sys.stderr)
 
     # 4. Top 10 demo (console + HTML)
     print_top10_agentic(con)
