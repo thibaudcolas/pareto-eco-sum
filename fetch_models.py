@@ -34,6 +34,7 @@ Usage
   ./fetch_models.py --no-modelsdev  # skip models.dev fetch and enrichment
   ./fetch_models.py --no-html       # skip HTML report
 """
+
 from __future__ import annotations
 
 import argparse
@@ -134,15 +135,28 @@ PROVIDER_COLORS: dict[str, str] = {
 }
 
 FALLBACK_PALETTE = [
-    "#5b8def", "#f97316", "#10b981", "#a855f7", "#ec4899",
-    "#14b8a6", "#eab308", "#6366f1", "#84cc16", "#f43f5e",
-    "#06b6d4", "#8b5cf6", "#fb7185", "#22d3ee", "#facc15",
+    "#5b8def",
+    "#f97316",
+    "#10b981",
+    "#a855f7",
+    "#ec4899",
+    "#14b8a6",
+    "#eab308",
+    "#6366f1",
+    "#84cc16",
+    "#f43f5e",
+    "#06b6d4",
+    "#8b5cf6",
+    "#fb7185",
+    "#22d3ee",
+    "#facc15",
 ]
 
 
 # --------------------------------------------------------------------------- #
 # API key
 # --------------------------------------------------------------------------- #
+
 
 def load_api_key() -> str:
     load_dotenv(SCRIPT_DIR / ".env")
@@ -156,18 +170,25 @@ def load_api_key() -> str:
 # Fetching
 # --------------------------------------------------------------------------- #
 
+
 def _cache_age_hours(path: Path) -> float | None:
     if not path.exists():
         return None
     return (time.time() - path.stat().st_mtime) / 3600
 
 
-def fetch_aa_models(api_key: str, *, force: bool = False) -> tuple[dict[str, Any], Path]:
+def fetch_aa_models(
+    api_key: str, *, force: bool = False
+) -> tuple[dict[str, Any], Path]:
     """Fetch every page of /language/models/free and cache the merged payload."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / "language_models_free_latest.json"
 
-    if not force and (age := _cache_age_hours(cache_path)) is not None and age * 3600 < CACHE_TTL_SECONDS:
+    if (
+        not force
+        and (age := _cache_age_hours(cache_path)) is not None
+        and age * 3600 < CACHE_TTL_SECONDS
+    ):
         print(f"Using cached AA response (age {age:.1f}h): {cache_path}")
         return json.loads(cache_path.read_text()), cache_path
 
@@ -177,7 +198,9 @@ def fetch_aa_models(api_key: str, *, force: bool = False) -> tuple[dict[str, Any
     page = 1
     total_pages = 1
 
-    with httpx.Client(base_url=AA_BASE_URL, timeout=REQUEST_TIMEOUT, headers=headers) as client:
+    with httpx.Client(
+        base_url=AA_BASE_URL, timeout=REQUEST_TIMEOUT, headers=headers
+    ) as client:
         while page <= total_pages:
             print(f"Fetching AA page {page}/{total_pages if meta else '?'} ...")
             resp = client.get(AA_ENDPOINT, params={"page": page})
@@ -185,7 +208,9 @@ def fetch_aa_models(api_key: str, *, force: bool = False) -> tuple[dict[str, Any
             remaining = resp.headers.get("X-RateLimit-Remaining")
             limit = resp.headers.get("X-RateLimit-Limit")
             if remaining is not None:
-                print(f"  rate limit: {remaining}/{limit} left today (tier={resp.headers.get('X-AA-Tier')})")
+                print(
+                    f"  rate limit: {remaining}/{limit} left today (tier={resp.headers.get('X-AA-Tier')})"
+                )
 
             if resp.status_code == 429:
                 retry = resp.headers.get("Retry-After")
@@ -193,12 +218,15 @@ def fetch_aa_models(api_key: str, *, force: bool = False) -> tuple[dict[str, Any
             resp.raise_for_status()
 
             payload = resp.json()
-            (CACHE_DIR / f"aa_language_models_free_page{page}_{datetime.now():%Y%m%d_%H%M%S}.json").write_text(
-                json.dumps(payload, indent=2)
-            )
+            (
+                CACHE_DIR
+                / f"aa_language_models_free_page{page}_{datetime.now():%Y%m%d_%H%M%S}.json"
+            ).write_text(json.dumps(payload, indent=2))
 
             if not meta:
-                meta = {k: payload.get(k) for k in ("tier", "intelligence_index_version")}
+                meta = {
+                    k: payload.get(k) for k in ("tier", "intelligence_index_version")
+                }
                 pagination = payload.get("pagination", {})
                 total_pages = pagination.get("total_pages", 1)
 
@@ -210,7 +238,12 @@ def fetch_aa_models(api_key: str, *, force: bool = False) -> tuple[dict[str, Any
     merged = {
         "tier": meta.get("tier"),
         "intelligence_index_version": meta.get("intelligence_index_version"),
-        "pagination": {"page": 1, "page_size": len(merged_data), "total_pages": 1, "has_more": False},
+        "pagination": {
+            "page": 1,
+            "page_size": len(merged_data),
+            "total_pages": 1,
+            "has_more": False,
+        },
         "data": merged_data,
         "_fetched_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -223,7 +256,11 @@ def fetch_modelsdev_catalog(*, force: bool = False) -> dict[str, Any]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / "modelsdev_catalog_latest.json"
 
-    if not force and (age := _cache_age_hours(cache_path)) is not None and age * 3600 < CACHE_TTL_SECONDS:
+    if (
+        not force
+        and (age := _cache_age_hours(cache_path)) is not None
+        and age * 3600 < CACHE_TTL_SECONDS
+    ):
         print(f"Using cached models.dev catalog (age {age:.1f}h): {cache_path}")
         return json.loads(cache_path.read_text())
 
@@ -238,13 +275,17 @@ def fetch_modelsdev_catalog(*, force: bool = False) -> dict[str, Any]:
         "providers": len(payload.get("providers", {})),
         "models": len(payload.get("models", {})),
     }
-    print(f"Wrote models.dev cache: {cache_path} ({counts['providers']} providers, {counts['models']} models)")
+    print(
+        f"Wrote models.dev cache: {cache_path} ({counts['providers']} providers, {counts['models']} models)"
+    )
     return payload
 
 
 def load_sample() -> tuple[dict[str, Any], Path]:
     if not SAMPLE_FILE.exists():
-        sys.exit("No AA cache and no sample.json to fall back on. Run without --no-fetch first.")
+        sys.exit(
+            "No AA cache and no sample.json to fall back on. Run without --no-fetch first."
+        )
     print(f"Loading sample data (no API calls): {SAMPLE_FILE}")
     return json.loads(SAMPLE_FILE.read_text()), SAMPLE_FILE
 
@@ -252,6 +293,7 @@ def load_sample() -> tuple[dict[str, Any], Path]:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+
 
 def _parse_date(value: str | None) -> date | None:
     if not value:
@@ -291,7 +333,9 @@ def _country_flag(code: str | None) -> str:
     if not code.isalpha():
         return ""
     # Regional indicator symbol range: U+1F1E6 for 'A' .. U+1F1FF for 'Z'
-    return chr(0x1F1E6 + (ord(code[0]) - ord("A"))) + chr(0x1F1E6 + (ord(code[1]) - ord("A")))
+    return chr(0x1F1E6 + (ord(code[0]) - ord("A"))) + chr(
+        0x1F1E6 + (ord(code[1]) - ord("A"))
+    )
 
 
 def normalize_slug(slug: str | None) -> str | None:
@@ -309,6 +353,7 @@ def normalize_slug(slug: str | None) -> str | None:
 # --------------------------------------------------------------------------- #
 # DuckDB schema
 # --------------------------------------------------------------------------- #
+
 
 def init_db(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(
@@ -420,6 +465,8 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+
+
 def load_provider_overrides(con: duckdb.DuckDBPyConnection) -> None:
     """Apply provider overrides: add custom providers or override fields.
 
@@ -476,15 +523,25 @@ def load_provider_overrides(con: duckdb.DuckDBPyConnection) -> None:
                 (pid,),
             )
             con.executemany(
-                "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 6) + ")",
-                [(pid, m["slug"], m["slug"], m["slug"], m.get("cache_read"), fetched_at)
-                 for m in models],
+                "INSERT INTO modelsdev_provider_models VALUES ("
+                + ", ".join(["?"] * 6)
+                + ")",
+                [
+                    (
+                        pid,
+                        m["slug"],
+                        m["slug"],
+                        m["slug"],
+                        m.get("cache_read"),
+                        fetched_at,
+                    )
+                    for m in models
+                ],
             )
 
         models_hint = f", {len(models)} models" if models else ""
         print(
-            f"Applied provider override: {pname} ({pid}) "
-            f"HQ={hq} DCs={dcs}{models_hint}"
+            f"Applied provider override: {pname} ({pid}) HQ={hq} DCs={dcs}{models_hint}"
         )
 
 
@@ -538,7 +595,14 @@ def load_aa_models(
         )
     con.execute(
         "INSERT INTO fetch_runs VALUES (?, ?, ?, ?, ?, ?)",
-        (fetched_at, AA_BASE_URL + AA_ENDPOINT, tier, version, len(rows), str(raw_path)),
+        (
+            fetched_at,
+            AA_BASE_URL + AA_ENDPOINT,
+            tier,
+            version,
+            len(rows),
+            str(raw_path),
+        ),
     )
     print(f"Loaded {len(rows)} AA models into DuckDB (version {version}, tier {tier})")
 
@@ -616,26 +680,38 @@ def load_modelsdev(con: duckdb.DuckDBPyConnection, catalog: dict[str, Any]) -> N
             slug_norm = normalize_slug(mid.split("/", 1)[-1] if "/" in mid else mid)
             cost = m.get("cost") or {}
             cache_read = cost.get("cache_read")
-            junction_rows.append((pid, mid, slug_norm, m.get("name"), cache_read, fetched_at))
+            junction_rows.append(
+                (pid, mid, slug_norm, m.get("name"), cache_read, fetched_at)
+            )
     con.execute("DELETE FROM modelsdev_provider_models")
     if junction_rows:
         con.executemany(
-            "INSERT INTO modelsdev_provider_models VALUES (" + ", ".join(["?"] * 6) + ")",
+            "INSERT INTO modelsdev_provider_models VALUES ("
+            + ", ".join(["?"] * 6)
+            + ")",
             junction_rows,
         )
 
-    print(f"Loaded {len(prov_rows)} providers, {len(md_rows)} models, and {len(junction_rows)} provider→model links from models.dev")
+    print(
+        f"Loaded {len(prov_rows)} providers, {len(md_rows)} models, and {len(junction_rows)} provider→model links from models.dev"
+    )
 
 
 def fetch_openrouter_providers(*, force: bool = False) -> dict[str, Any]:
     """Fetch OpenRouter providers and cache for 24h."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / "openrouter_providers_latest.json"
-    if not force and (age := _cache_age_hours(cache_path)) is not None and age * 3600 < CACHE_TTL_SECONDS:
+    if (
+        not force
+        and (age := _cache_age_hours(cache_path)) is not None
+        and age * 3600 < CACHE_TTL_SECONDS
+    ):
         print(f"Using cached OpenRouter providers (age {age:.1f}h): {cache_path}")
         return json.loads(cache_path.read_text())
     print("Fetching OpenRouter providers...")
-    with httpx.Client(timeout=REQUEST_TIMEOUT, headers={"accept": "application/json"}) as client:
+    with httpx.Client(
+        timeout=REQUEST_TIMEOUT, headers={"accept": "application/json"}
+    ) as client:
         resp = client.get(OPENROUTER_PROVIDERS_URL)
         resp.raise_for_status()
         payload = resp.json()
@@ -645,7 +721,9 @@ def fetch_openrouter_providers(*, force: bool = False) -> dict[str, Any]:
     return payload
 
 
-def load_openrouter_providers(con: duckdb.DuckDBPyConnection, payload: dict[str, Any]) -> None:
+def load_openrouter_providers(
+    con: duckdb.DuckDBPyConnection, payload: dict[str, Any]
+) -> None:
     """Load OpenRouter providers into DuckDB, deriving a domain from URL fields."""
     fetched_at = datetime.now(timezone.utc)
     items = payload.get("data", [])
@@ -658,17 +736,19 @@ def load_openrouter_providers(con: duckdb.DuckDBPyConnection, payload: dict[str,
                 # Extract netloc, strip leading www.
                 domain = url.split("//", 1)[-1].split("/", 1)[0].replace("www.", "")
                 break
-        rows.append((
-            p.get("slug"),
-            p.get("name"),
-            p.get("headquarters"),
-            ",".join(p.get("datacenters") or []),
-            p.get("privacy_policy_url"),
-            p.get("terms_of_service_url"),
-            p.get("status_page_url"),
-            domain,
-            fetched_at,
-        ))
+        rows.append(
+            (
+                p.get("slug"),
+                p.get("name"),
+                p.get("headquarters"),
+                ",".join(p.get("datacenters") or []),
+                p.get("privacy_policy_url"),
+                p.get("terms_of_service_url"),
+                p.get("status_page_url"),
+                domain,
+                fetched_at,
+            )
+        )
     con.execute("DELETE FROM openrouter_providers")
     if rows:
         con.executemany(
@@ -749,7 +829,7 @@ def compute_aa_modelsdev_matches(con: duckdb.DuckDBPyConnection) -> None:
         if chosen[0] is None:
             dash = aa_slug.find("-")
             if dash > 0:
-                stripped = aa_slug[dash + 1:]
+                stripped = aa_slug[dash + 1 :]
                 candidates = slug_index.get(stripped)
                 if candidates:
                     chosen = pick_best(candidates)
@@ -808,7 +888,9 @@ def compute_aa_neuralwatt_matches(con: duckdb.DuckDBPyConnection) -> None:
     if not has_nw:
         # Create an empty matches table so the enriched view joins cleanly.
         con.execute("DELETE FROM aa_neuralwatt_matches")
-        print("Skipped AA <-> Neuralwatt matches: neuralwatt_models table not loaded yet")
+        print(
+            "Skipped AA <-> Neuralwatt matches: neuralwatt_models table not loaded yet"
+        )
         return
 
     aa_rows = con.execute("SELECT id, name FROM aa_models").fetchall()
@@ -832,11 +914,16 @@ def compute_aa_neuralwatt_matches(con: duckdb.DuckDBPyConnection) -> None:
             continue
         aa_name_l = aa_name.lower()
         chosen: tuple[str | None, str | None, str | None] = (None, None, None)
+
         # Prefer exact, then starts-with (longest display_name wins for specificity).
         def pick(candidates: list[tuple[str, bool]]) -> tuple[str, str, str]:
             base = [c for c in candidates if c[1]]
             chosen_list = base if base else candidates
-            return chosen_list[0][0], None, None  # display_name not available here; just return id.
+            return (
+                chosen_list[0][0],
+                None,
+                None,
+            )  # display_name not available here; just return id.
 
         # Strategy 1: exact name match.
         candidates = by_name.get(aa_name_l)
@@ -847,7 +934,11 @@ def compute_aa_neuralwatt_matches(con: duckdb.DuckDBPyConnection) -> None:
 
         # Strategy 2: AA name starts with NW display_name (longest first).
         if chosen[0] is None:
-            matching = [(key, cands) for key, cands in by_name.items() if aa_name_l.startswith(key + " ") or aa_name_l.startswith(key + "(")]
+            matching = [
+                (key, cands)
+                for key, cands in by_name.items()
+                if aa_name_l.startswith(key + " ") or aa_name_l.startswith(key + "(")
+            ]
             if matching:
                 matching.sort(key=lambda kv: len(kv[0]), reverse=True)
                 key, cands = matching[0]
@@ -865,7 +956,9 @@ def compute_aa_neuralwatt_matches(con: duckdb.DuckDBPyConnection) -> None:
             "INSERT INTO aa_neuralwatt_matches VALUES (" + ", ".join(["?"] * 4) + ")",
             out_rows,
         )
-    print(f"Computed AA <-> Neuralwatt matches: {matched}/{len(out_rows)} models matched")
+    print(
+        f"Computed AA <-> Neuralwatt matches: {matched}/{len(out_rows)} models matched"
+    )
 
 
 def create_enriched_view(con: duckdb.DuckDBPyConnection) -> None:
@@ -909,9 +1002,45 @@ def create_enriched_view(con: duckdb.DuckDBPyConnection) -> None:
     )
 
 
+def build_provider_type_map(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """Map provider id -> type: Proxy, Model maker, or Other.
+
+    Proxies are providers whose name/id contains "router"/"routing"/"gateway",
+    or are known proxy services (NanoGPT, OpenCode Go, Ollama Cloud).
+    Model makers are providers that appear as the creator of at least one model
+    in the models.dev catalog.
+    """
+    providers = dict(con.execute("SELECT id, name FROM modelsdev_providers").fetchall())
+    model_maker_ids = set(
+        r[0]
+        for r in con.execute(
+            "SELECT DISTINCT provider_id FROM modelsdev_models"
+        ).fetchall()
+    )
+    model_maker_ids.update({"zai", "alibaba-cn", "minimax-cn", "moonshotai"})
+    proxy_keywords = ["router", "routing", "gateway"]
+    proxy_names = {"nanogpt", "opencode go", "ollama cloud", "hugging face"}
+    proxy_ids = {"nanogpt", "opencode-go", "ollama-cloud", "huggingface"}
+
+    type_map: dict[str, str] = {}
+    for pid, pname in providers.items():
+        name_lower = (pname or "").lower()
+        id_lower = pid.lower()
+        if any(kw in name_lower or kw in id_lower for kw in proxy_keywords):
+            type_map[pid] = "Proxy"
+        elif name_lower in proxy_names or id_lower in proxy_ids:
+            type_map[pid] = "Proxy"
+        elif pid in model_maker_ids:
+            type_map[pid] = "Model maker"
+        else:
+            type_map[pid] = "Other"
+    return type_map
+
+
 # --------------------------------------------------------------------------- #
 # Reports
 # --------------------------------------------------------------------------- #
+
 
 def print_top10_agentic(con: duckdb.DuckDBPyConnection) -> None:
     print("\nTop 10 models by Artificial Analysis Agentic Index:")
@@ -930,7 +1059,9 @@ def print_top10_agentic(con: duckdb.DuckDBPyConnection) -> None:
     print(f"  {'#':>2}  {'Agentic':>7}  {'Coding':>7}  {'Intel':>7}  Model (creator)")
     print(f"  {'-' * 70}")
     for i, (name, creator, agentic, coding, intel) in enumerate(rows, 1):
-        print(f"  {i:>2}  {agentic or 0:>7.2f}  {coding or 0:>7.2f}  {intel or 0:>7.2f}  {name} ({creator})")
+        print(
+            f"  {i:>2}  {agentic or 0:>7.2f}  {coding or 0:>7.2f}  {intel or 0:>7.2f}  {name} ({creator})"
+        )
 
 
 def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
@@ -980,7 +1111,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not rows:
-        print("Skipping HTML report: no open-weight models with an agentic index score matched models.dev.")
+        print(
+            "Skipping HTML report: no open-weight models with an agentic index score matched models.dev."
+        )
         return
 
     # Scatter data: all open-weight models that have an agentic score AND
@@ -1062,6 +1195,8 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         """
     ).fetchall()
 
+    provider_type_map = build_provider_type_map(con)
+
     scatter_data = [
         {
             "name": r[0],
@@ -1081,6 +1216,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             "release_date": str(r[14]) if r[14] else None,
             "provider_id": r[15] or "",
             "provider_name": r[16] or r[2],
+            "provider_type": provider_type_map.get(r[15] or r[2], "Other"),
             "weights_url": (r[17].split(",", 1)[0] if r[17] else None),
             "nw_model_id": r[18],
             "nw_display_name": r[19],
@@ -1143,7 +1279,8 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             "energy_mwh": r[7],
             "cache_hit_rate": r[8],
             "request_pct": r[9],
-            "is_variant": "-fast" in (r[1] or "").lower() or "-short" in (r[1] or "").lower(),
+            "is_variant": "-fast" in (r[1] or "").lower()
+            or "-short" in (r[1] or "").lower(),
         }
         for r in nw_scatter_rows
     ]
@@ -1151,8 +1288,18 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     # --- Linear regression: energy_mwh ~ slope * blended_cost + intercept ---
     # Computed on NW base models only (excluding -fast / -short variants) so the
     # relationship reflects the "canonical" model, not tuned variants.
-    regression: dict[str, Any] = {"n": 0, "slope": None, "intercept": None, "r": None, "r_squared": None}
-    base_points = [(d["blended_cost"], d["energy_mwh"]) for d in nw_scatter_data if not d["is_variant"]]
+    regression: dict[str, Any] = {
+        "n": 0,
+        "slope": None,
+        "intercept": None,
+        "r": None,
+        "r_squared": None,
+    }
+    base_points = [
+        (d["blended_cost"], d["energy_mwh"])
+        for d in nw_scatter_data
+        if not d["is_variant"]
+    ]
     if len(base_points) >= 3:
         n = len(base_points)
         xs = [p[0] for p in base_points]
@@ -1173,7 +1320,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
                 "r": round(r, 4),
                 "r_squared": round(r * r, 4),
             }
-            print(f"Neuralwatt regression (n={n}): energy_mWh = {regression['slope']} × cost + {regression['intercept']} (r={regression['r']}, r²={regression['r_squared']})")
+            print(
+                f"Neuralwatt regression (n={n}): energy_mWh = {regression['slope']} × cost + {regression['intercept']} (r={regression['r']}, r²={regression['r_squared']})"
+            )
 
     # Ratio between NW blended cost and AA blended cost for each matched model.
     # This lets us estimate NW blended cost for unmatched models from their AA
@@ -1184,7 +1333,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         aa_c = entry.get("blended_cost")
         if nw_c and aa_c and aa_c > 0:
             nw_aa_cost_ratios.append(nw_c / aa_c)
-    avg_nw_aa_ratio = (sum(nw_aa_cost_ratios) / len(nw_aa_cost_ratios)) if nw_aa_cost_ratios else 1.0
+    avg_nw_aa_ratio = (
+        (sum(nw_aa_cost_ratios) / len(nw_aa_cost_ratios)) if nw_aa_cost_ratios else 1.0
+    )
 
     # Apply estimated energy to AA scatter entries.
     # Use NW blended cost when available; for unmatched models, estimate NW
@@ -1213,7 +1364,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             # very cheap models don't get estimated at 0 mWh (which is physically
             # implausible). Use the lowest measured energy from base models.
             min_energy = min((p[1] for p in base_points), default=0)
-            entry["nw_energy_estimated_mwh"] = round(max(min_energy * 0.5, predicted), 2)
+            entry["nw_energy_estimated_mwh"] = round(
+                max(min_energy * 0.5, predicted), 2
+            )
             entry["energy_per_req"] = entry["nw_energy_estimated_mwh"]
 
             # Energy per task: estimate from cost_per_task via regression,
@@ -1221,8 +1374,12 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             cpt = entry.get("cost_per_task")
             if cpt and cpt > 0:
                 est_cpt_nw = cpt * avg_nw_aa_ratio
-                predicted_task = regression["slope"] * est_cpt_nw + regression["intercept"]
-                entry["energy_per_task_estimated_mwh"] = round(max(min_energy * 0.5, predicted_task), 2)
+                predicted_task = (
+                    regression["slope"] * est_cpt_nw + regression["intercept"]
+                )
+                entry["energy_per_task_estimated_mwh"] = round(
+                    max(min_energy * 0.5, predicted_task), 2
+                )
                 entry["energy_per_task"] = entry["energy_per_task_estimated_mwh"]
 
     # Provider color map: brand color if known, else derive from the provider's
@@ -1234,7 +1391,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         if pid in seen_pids:
             continue
         seen_pids.add(pid)
-        providers_in_data.append({"id": entry["provider_id"], "name": entry["provider_name"], "pid": pid})
+        providers_in_data.append(
+            {"id": entry["provider_id"], "name": entry["provider_name"], "pid": pid}
+        )
 
     color_map: dict[str, str] = {}
     for idx, prov in enumerate(providers_in_data):
@@ -1257,7 +1416,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         resolved = (
             PROVIDER_COLORS.get(pname)
             or PROVIDER_COLORS.get(pname.lower())
-            or FALLBACK_PALETTE[(len(providers_in_data) + nw_provider_idx) % len(FALLBACK_PALETTE)]
+            or FALLBACK_PALETTE[
+                (len(providers_in_data) + nw_provider_idx) % len(FALLBACK_PALETTE)
+            ]
         )
         color_map[pname] = resolved
         nw_provider_idx += 1
@@ -1266,21 +1427,42 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     cards: list[str] = []
     for i, r in enumerate(rows, 1):
         (
-            name, slug, creator, release, agentic, coding, intel,
-            p_in, p_out, p_cache, tps, provider_id, provider_name, weights_urls,
-            nw_model_id, nw_in, nw_out, nw_energy,
-            md_input_mods, md_output_mods, md_tool_call, md_reasoning, md_context,
+            name,
+            slug,
+            creator,
+            release,
+            agentic,
+            coding,
+            intel,
+            p_in,
+            p_out,
+            p_cache,
+            tps,
+            provider_id,
+            provider_name,
+            weights_urls,
+            nw_model_id,
+            nw_in,
+            nw_out,
+            nw_energy,
+            md_input_mods,
+            md_output_mods,
+            md_tool_call,
+            md_reasoning,
+            md_context,
             providers_offering,
         ) = r
 
         # Resolve provider color for the logo border.
-        border_color = color_map.get(provider_id) or color_map.get(provider_name) or "#5b8def"
+        border_color = (
+            color_map.get(provider_id) or color_map.get(provider_name) or "#5b8def"
+        )
 
         if provider_id:
             logo = (
                 f'<img class="logo" src="{MODELSDEV_LOGOS_BASE}/{escape(provider_id)}.svg" '
                 f'alt="{escape(provider_name)} logo" '
-                f'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline\'">'
+                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline'\">"
                 f'<span class="logo-fallback" style="display:none">{escape(provider_name[0])}</span>'
             )
         else:
@@ -1297,22 +1479,32 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             energy_str = f"{nw_energy:.2f} mWh" if nw_energy is not None else "—"
             nw_chip = (
                 f'<span class="nw-chip" title="Neuralwatt · energy per request at the 16k–64k band">'
-                f'⚡ {escape(energy_str)}'
-                f'</span>'
+                f"⚡ {escape(energy_str)}"
+                f"</span>"
             )
 
         # Capability chips.
         caps: list[str] = []
         if md_reasoning:
-            caps.append('<span class="cap-chip cap-reasoning" title="Reasoning">R</span>')
+            caps.append(
+                '<span class="cap-chip cap-reasoning" title="Reasoning">R</span>'
+            )
         if md_tool_call:
-            caps.append('<span class="cap-chip cap-tools" title="Tool calling">T</span>')
+            caps.append(
+                '<span class="cap-chip cap-tools" title="Tool calling">T</span>'
+            )
         if md_input_mods:
             for m in md_input_mods.split(","):
                 m = m.strip()
                 if m:
-                    caps.append(f'<span class="cap-chip cap-mod" title="Input: {escape(m)}">{escape(m[:3])}</span>')
-        ctx_str = f'<span class="cap-chip cap-ctx" title="Context window">{md_context // 1000 if md_context else "?"}k</span>' if md_context else ""
+                    caps.append(
+                        f'<span class="cap-chip cap-mod" title="Input: {escape(m)}">{escape(m[:3])}</span>'
+                    )
+        ctx_str = (
+            f'<span class="cap-chip cap-ctx" title="Context window">{md_context // 1000 if md_context else "?"}k</span>'
+            if md_context
+            else ""
+        )
 
         # Provider list: parse the tab-separated \n-delimited aggregate.
         provider_links: list[str] = []
@@ -1325,14 +1517,16 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
                         f'<a class="provider-link" href="{escape(doc)}" target="_blank" rel="noopener" title="{escape(pname)} docs">{escape(pname)}</a>'
                     )
                 elif len(parts) >= 2 and parts[1]:
-                    provider_links.append(f'<span class="provider-link">{escape(parts[1])}</span>')
+                    provider_links.append(
+                        f'<span class="provider-link">{escape(parts[1])}</span>'
+                    )
         providers_html = ""
         if provider_links:
             providers_html = (
                 f'<div class="card-providers">'
                 f'<span class="providers-label">{len(provider_links)} providers:</span>'
-                f'{"".join(provider_links)}'
-                f'</div>'
+                f"{''.join(provider_links)}"
+                f"</div>"
             )
 
         cards.append(f"""
@@ -1346,7 +1540,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
               <span>released {_relative_date(_parse_date(str(release) if release else None))}</span>
               <span>slug: <code>{escape(slug)}</code></span>
               {ctx_str}
-              {''.join(caps)}
+              {"".join(caps)}
               {nw_chip}
             </div>
             {providers_html}
@@ -1377,7 +1571,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             logo_html = (
                 f'<img src="{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg" alt="{escape(pname)}" '
                 f'title="{escape(pname)}" loading="lazy" '
-                f'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-block\'">'
+                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline-block'\">"
                 f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
             )
         else:
@@ -1387,13 +1581,20 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             f'<span class="swatch" style="background:{color}"></span>'
             f'<span class="legend-logo" style="background:{color}20">{logo_html}</span>'
             f'<span class="legend-name">{escape(pname)}</span>'
-            f'</span>'
+            f"</span>"
         )
 
     json_blob = json.dumps(scatter_data, separators=(",", ":"))
     color_map_json = json.dumps(color_map, separators=(",", ":"))
     providers_json = json.dumps(
-        [{"id": p["id"] or p["name"], "name": p["name"], "color": color_map[p["pid"]]} for p in providers_in_data],
+        [
+            {
+                "id": p["id"] or p["name"],
+                "name": p["name"],
+                "color": color_map[p["pid"]],
+            }
+            for p in providers_in_data
+        ],
         separators=(",", ":"),
     )
     plot_build_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1428,7 +1629,17 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         """
     ).fetchall()
     provider_cards: list[str] = []
-    for pid, pname, doc_url, count, hq, dcs, or_domain, has_cache_read in provider_section_rows:
+    for (
+        pid,
+        pname,
+        doc_url,
+        count,
+        hq,
+        dcs,
+        or_domain,
+        has_cache_read,
+    ) in provider_section_rows:
+        ptype = provider_type_map.get(pid, "Other")
         color = color_map.get(pid) or color_map.get(pname) or "#5b8def"
 
         # Derive a domain for the favicon: prefer OpenRouter-derived domain,
@@ -1440,19 +1651,23 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         # Favicon from Google's service, with models.dev logo as fallback.
         if domain:
             logo_html = (
-                f'<img src="{GOOGLE_FAVICONS_URL}{escape(domain)}" alt="{escape(pname)}" loading="lazy" '
-                f'onerror="this.onerror=null;this.src=\'{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg\';'
-                f'this.nextElementSibling.style.display=\'inline-block\'">'
-                f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
-            ) if pid else (
-                f'<img src="{GOOGLE_FAVICONS_URL}{escape(domain)}" alt="{escape(pname)}" loading="lazy" '
-                f'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-block\'">'
-                f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
+                (
+                    f'<img src="{GOOGLE_FAVICONS_URL}{escape(domain)}" alt="{escape(pname)}" loading="lazy" '
+                    f"onerror=\"this.onerror=null;this.src='{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg';"
+                    f"this.nextElementSibling.style.display='inline-block'\">"
+                    f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
+                )
+                if pid
+                else (
+                    f'<img src="{GOOGLE_FAVICONS_URL}{escape(domain)}" alt="{escape(pname)}" loading="lazy" '
+                    f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline-block'\">"
+                    f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
+                )
             )
         elif pid:
             logo_html = (
                 f'<img src="{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg" alt="{escape(pname)}" loading="lazy" '
-                f'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-block\'">'
+                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline-block'\">"
                 f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
             )
         else:
@@ -1469,7 +1684,9 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             dc_flags = []
             for dc in dc_list:
                 if dc.upper() not in seen:
-                    dc_flags.append(f'<span class="loc-badge loc-dc" title="Datacenter: {escape(dc)}">{_country_flag(dc)} {escape(dc)}</span>')
+                    dc_flags.append(
+                        f'<span class="loc-badge loc-dc" title="Datacenter: {escape(dc)}">{_country_flag(dc)} {escape(dc)}</span>'
+                    )
                     seen.add(dc.upper())
             if dc_flags:
                 loc_badges += "".join(dc_flags)
@@ -1479,15 +1696,15 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         hq_attr = hq or "unknown"
         cache_attr = "priced" if has_cache_read else "all"
         provider_cards.append(
-            f'<{tag} class="provider-card" data-hq="{escape(hq_attr.lower())}" data-cache="{cache_attr}" {link} target="_blank" rel="noopener" '
+            f'<{tag} class="provider-card" data-hq="{escape(hq_attr.lower())}" data-cache="{cache_attr}" data-ptype="{escape(ptype.lower().replace(" ", "-"))}" {link} target="_blank" rel="noopener" '
             f'style="border-color: {color}33;">'
             f'<span class="provider-card-logo" style="background: {color}20;">{logo_html}</span>'
             f'<span class="provider-card-info">'
             f'<span class="provider-card-name">{escape(pname)}</span>'
-            f'{loc_badges}'
-            f'</span>'
+            f"{loc_badges}"
+            f"</span>"
             f'<span class="provider-card-count" style="color: {color};">{count}</span>'
-            f'</{tag}>'
+            f"</{tag}>"
         )
 
     html = f"""<!doctype html>
@@ -1680,7 +1897,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
 
   <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Model comparison — {len(scatter_data)} open-weight models</h2>
   <div class="scatter-wrap">
-    <div class="provider-legend">{''.join(legend_items)}</div>
+    <div class="provider-legend">{"".join(legend_items)}</div>
     <div class="scatter-controls">
       <span class="controls-label">X axis</span>
       <label class="metric-radio x-metric" data-xmetric="blended_cost" data-active="true">
@@ -1735,6 +1952,18 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         <input type="checkbox" checked> ❌ Not priced
       </label>
     </div>
+    <div class="scatter-controls">
+      <span class="controls-label">Provider type</span>
+      <label class="filter-chip" data-ptype="model-maker" data-active="true">
+        <input type="checkbox" checked> Model maker
+      </label>
+      <label class="filter-chip" data-ptype="proxy" data-active="true">
+        <input type="checkbox" checked> Proxy
+      </label>
+      <label class="filter-chip" data-ptype="other" data-active="true">
+        <input type="checkbox" checked> Other
+      </label>
+    </div>
     <div id="scatter-plot"></div>
     <p class="plot-note">Blended cost = <code>(7·cache + 2·input + 1·output)/10</code>. When a provider omits cache-hit pricing, the input price is used as an upper bound (cache hits are never more expensive than a regular input token). <strong>{len(scatter_data)} models shown</strong>: open-weight (via models.dev), with an Agentic Index score AND input + output pricing. Models without input or output pricing are excluded. Neuralwatt energy values in tooltips are measured when an AA model matches a NW model; otherwise the tooltip shows an <strong>estimated</strong> energy derived from the NW cost ↔ energy regression (see the Neuralwatt scatter below).</p>
   </div>
@@ -1750,7 +1979,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
   </div>
 
   <h2 class="section" id="models"><a href="#models" class="anchor">§</a> Open-weight models — {len(rows)} models by Agentic Index</h2>
-  <section class="top10">{''.join(cards)}
+  <section class="top10">{"".join(cards)}
   </section>
 
   <h2 class="section" id="providers"><a href="#providers" class="anchor">§</a> Providers ({len(provider_section_rows)})</h2>
@@ -1765,8 +1994,12 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     <span class="controls-label" style="margin-left:1rem">KV cache</span>
     <span class="filter-chip" data-cache="priced" data-active="true" tabindex="0">💰 Priced</span>
     <span class="filter-chip" data-cache="all" data-active="true" tabindex="0">❌ Not priced</span>
+    <span class="controls-label" style="margin-left:1rem">Provider type</span>
+    <span class="filter-chip" data-ptype="model-maker" data-active="true" tabindex="0">Model maker</span>
+    <span class="filter-chip" data-ptype="proxy" data-active="true" tabindex="0">Proxy</span>
+    <span class="filter-chip" data-ptype="other" data-active="true" tabindex="0">Other</span>
   </div>
-  <div class="providers-grid" id="providers-grid">{''.join(provider_cards)}
+  <div class="providers-grid" id="providers-grid">{"".join(provider_cards)}
   </div>
 
   <footer>Logos from models.dev. Scores subject to Intelligence Index version in the AA response; see
@@ -1919,6 +2152,14 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         const kvAll = document.querySelector('.filter-chip[data-kv="all"]').dataset.active === "true";
         if (d.has_cache_priced_provider && !kvPriced) return false;
         if (!d.has_cache_priced_provider && !kvAll) return false;
+        // Provider type filter.
+        const ptypeFilters = {{
+          "model-maker": document.querySelector('.filter-chip[data-ptype="model-maker"]').dataset.active === "true",
+          proxy: document.querySelector('.filter-chip[data-ptype="proxy"]').dataset.active === "true",
+          other: document.querySelector('.filter-chip[data-ptype="other"]').dataset.active === "true",
+        }};
+        const ptypeKey = {{ "Proxy": "proxy", "Model maker": "model-maker", "Other": "other" }}[d.provider_type] || "other";
+        if (!ptypeFilters[ptypeKey]) return false;
         // Location filter.
         const hqs = (d.provider_hqs || "").split(",").filter(Boolean);
         if (hqs.length === 0) return locFilters.unknown;
@@ -1948,7 +2189,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         }});
 
       const plot = Plot.plot({{
-        marginTop: 24, marginRight: 40, marginBottom: 64, marginLeft: 70,
+        marginTop: 24, marginRight: 60, marginBottom: 64, marginLeft: 50,
         height: 560,
         x: {{
           type: "linear",
@@ -2239,6 +2480,10 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       document.querySelectorAll('#provider-filters .filter-chip[data-ploc]').forEach(function (c) {{
         filters[c.dataset.ploc] = c.dataset.active === 'true';
       }});
+      var ptypeFilters = {{}};
+      document.querySelectorAll('#provider-filters .filter-chip[data-ptype]').forEach(function (c) {{
+        ptypeFilters[c.dataset.ptype] = c.dataset.active === 'true';
+      }});
       var cachePriced = document.querySelector('#provider-filters .filter-chip[data-cache=priced]').dataset.active === 'true';
       var cacheAll = document.querySelector('#provider-filters .filter-chip[data-cache=all]').dataset.active === 'true';
       document.querySelectorAll('#providers-grid .provider-card').forEach(function (card) {{
@@ -2253,6 +2498,10 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
           var cache = card.dataset.cache;
           if (cache === 'priced' && !cachePriced) match = false;
           if (cache === 'all' && !cacheAll) match = false;
+        }}
+        if (match) {{
+          var ptype = card.dataset.ptype || 'other';
+          if (!ptypeFilters[ptype]) match = false;
         }}
         card.style.display = match ? '' : 'none';
       }});
@@ -2304,11 +2553,24 @@ def print_match_summary(con: duckdb.DuckDBPyConnection) -> None:
 # Main
 # --------------------------------------------------------------------------- #
 
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--no-fetch", action="store_true", help="Skip AA API; use cache or sample.json")
-    parser.add_argument("--force-refresh", action="store_true", help="Ignore cache TTL; re-fetch both APIs")
-    parser.add_argument("--no-modelsdev", action="store_true", help="Skip models.dev fetch and enrichment")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--no-fetch", action="store_true", help="Skip AA API; use cache or sample.json"
+    )
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Ignore cache TTL; re-fetch both APIs",
+    )
+    parser.add_argument(
+        "--no-modelsdev",
+        action="store_true",
+        help="Skip models.dev fetch and enrichment",
+    )
     parser.add_argument("--no-html", action="store_true", help="Skip HTML report")
     args = parser.parse_args()
 
@@ -2335,7 +2597,10 @@ def main() -> int:
             print_match_summary(con)
         except Exception as exc:
             print(f"WARN: models.dev step failed: {exc}", file=sys.stderr)
-            print("Proceeding without models.dev enrichment. Use --no-modelsdev next time to silence.", file=sys.stderr)
+            print(
+                "Proceeding without models.dev enrichment. Use --no-modelsdev next time to silence.",
+                file=sys.stderr,
+            )
 
     # 3b. Neuralwatt enrichment — runs whenever its DuckDB tables exist.
     if not args.no_modelsdev:
@@ -2374,8 +2639,12 @@ def main() -> int:
     ).fetchall()
     for (t,) in tables_to_export:
         con.execute(f"COPY {t} TO '{parquet_dir / (t + '.parquet')}' (FORMAT PARQUET)")
-    con.execute("CREATE OR REPLACE TEMP TABLE _enriched_export AS SELECT * FROM models_enriched")
-    con.execute(f"COPY _enriched_export TO '{parquet_dir / 'models_enriched.parquet'}' (FORMAT PARQUET)")
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE _enriched_export AS SELECT * FROM models_enriched"
+    )
+    con.execute(
+        f"COPY _enriched_export TO '{parquet_dir / 'models_enriched.parquet'}' (FORMAT PARQUET)"
+    )
     print(f"Exported {len(tables_to_export) + 1} tables to {parquet_dir}")
 
     con.close()
