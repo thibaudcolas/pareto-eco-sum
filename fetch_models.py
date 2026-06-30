@@ -2048,9 +2048,27 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       target.appendChild(plot);
 
       // Re-bind tooltips (circles get replaced on each render).
+      // Observable Plot does NOT preserve input data order in the rendered
+      // <circle> DOM when a mark has categorical/quantitative channels — it
+      // batches dots by channel value (e.g. by r or fillOpacity), so circle i
+      // in DOM order does NOT correspond to plotData[i]. We match each circle
+      // to its datum by the rendered (cx, cy) against the scaled data points.
+      const sx = plot.scale("x"), sy = plot.scale("y");
+      const apply = (sc, v) => (sc && typeof sc.apply === "function" ? sc.apply(v) : null);
+      const dedup = new Map(); // "cx|cy" → datum (last one wins on tie)
+      for (const d of plotData) {{
+        const cx = apply(sx, d[xMetric.field]);
+        const cy = apply(sy, d[yMetric.field]);
+        if (cx == null || cy == null) continue;
+        dedup.set(Math.round(cx * 100) + "|" + Math.round(cy * 100), d);
+      }}
       const circles = plot.querySelectorAll("circle");
-      circles.forEach((c, i) => {{
-        const d = plotData[i];
+      circles.forEach((c) => {{
+        const cx = parseFloat(c.getAttribute("cx"));
+        const cy = parseFloat(c.getAttribute("cy"));
+        const d = (Number.isFinite(cx) && Number.isFinite(cy))
+          ? dedup.get(Math.round(cx * 100) + "|" + Math.round(cy * 100))
+          : null;
         if (!d) return;
         c.style.cursor = "pointer";
         c.addEventListener("mouseenter", () => {{
@@ -2225,9 +2243,27 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
       target.appendChild(annotation);
     }}
 
+    // Re-bind tooltips. Observable Plot batches dots by channel value when a
+    // mark has categorical/quantitative styling channels (here: r, fillOpacity
+    // differ between base models and variants), so circle i in DOM order does
+    // NOT correspond to nwData[i]. Match each circle to its datum by the
+    // rendered (cx, cy) against the scaled data points instead.
+    const sxNw = plot.scale("x"), syNw = plot.scale("y");
+    const applyNw = (sc, v) => (sc && typeof sc.apply === "function" ? sc.apply(v) : null);
+    const dedupNw = new Map();
+    for (const d of nwData) {{
+      const cx = applyNw(sxNw, d.blended_cost);
+      const cy = applyNw(syNw, d.energy_mwh);
+      if (cx == null || cy == null) continue;
+      dedupNw.set(Math.round(cx * 100) + "|" + Math.round(cy * 100), d);
+    }}
     const circles = plot.querySelectorAll("circle");
-    circles.forEach((c, i) => {{
-      const d = nwData[i];
+    circles.forEach((c) => {{
+      const cx = parseFloat(c.getAttribute("cx"));
+      const cy = parseFloat(c.getAttribute("cy"));
+      const d = (Number.isFinite(cx) && Number.isFinite(cy))
+        ? dedupNw.get(Math.round(cx * 100) + "|" + Math.round(cy * 100))
+        : null;
       if (!d) return;
       c.style.cursor = "pointer";
       c.addEventListener("mouseenter", () => {{
