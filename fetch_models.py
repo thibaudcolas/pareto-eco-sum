@@ -99,6 +99,10 @@ PROVIDER_OVERRIDES_PATH = SCRIPT_DIR / "provider_overrides.yaml"
 with PROVIDER_OVERRIDES_PATH.open() as _f:
     PROVIDER_OVERRIDES: list[dict[str, Any]] = yaml.safe_load(_f)
 
+MODEL_OVERRIDES_PATH = SCRIPT_DIR / "model_overrides.yaml"
+with MODEL_OVERRIDES_PATH.open() as _f:
+    MODEL_OVERRIDES: list[dict[str, Any]] = yaml.safe_load(_f)
+
 CACHE_TTL_SECONDS = 24 * 3600
 REQUEST_TIMEOUT = 30.0
 SAMPLE_FILE = SCRIPT_DIR / "sample.json"
@@ -465,6 +469,15 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_overrides (
+            slug VARCHAR PRIMARY KEY,
+            open_weights BOOLEAN,
+            fetched_at TIMESTAMP
+        );
+        """
+    )
 
 
 def load_provider_overrides(con: duckdb.DuckDBPyConnection) -> None:
@@ -542,6 +555,48 @@ def load_provider_overrides(con: duckdb.DuckDBPyConnection) -> None:
         models_hint = f", {len(models)} models" if models else ""
         print(
             f"Applied provider override: {pname} ({pid}) HQ={hq} DCs={dcs}{models_hint}"
+        )
+
+
+def load_model_overrides(con: duckdb.DuckDBPyConnection) -> None:
+    """Apply model-level overrides (open_weights) from model_overrides.yaml.
+
+    Each entry in ``MODEL_OVERRIDES`` is upserted into the ``model_overrides``
+    table keyed by AA slug. The enriched view then uses ``COALESCE(mo.open_weights,
+    m.open_weights, FALSE)`` so overrides take precedence over models.dev data.
+
+    When an entry has ``providers``, a row is injected into
+    ``modelsdev_provider_models`` for each provider so the model appears as
+    offered by that provider in the report even when the provider's slug
+    differs from the AA slug (e.g. includes a parameter count).
+    """
+    fetched_at = datetime.now(timezone.utc)
+    # --- model_overrides table ---
+    rows = [(m["slug"], m.get("open_weights"), fetched_at) for m in MODEL_OVERRIDES]
+    con.execute("DELETE FROM model_overrides")
+    if rows:
+        con.executemany(
+            "INSERT INTO model_overrides VALUES (" + ", ".join(["?"] * 3) + ")",
+            rows,
+        )
+    print(f"Loaded {len(rows)} model overrides from {MODEL_OVERRIDES_PATH.name}")
+
+    # --- Inject provider→model links ---
+    junction_rows: list[tuple[str, str, str, str, float | None, Any]] = []
+    for m in MODEL_OVERRIDES:
+        providers = m.get("providers") or []
+        slug = m["slug"]
+        for prov_id in providers:
+            junction_rows.append((prov_id, slug, slug, slug, None, fetched_at))
+    if junction_rows:
+        con.executemany(
+            "INSERT INTO modelsdev_provider_models VALUES ("
+            + ", ".join(["?"] * 6)
+            + ")",
+            junction_rows,
+        )
+        print(
+            f"  Injected {len(junction_rows)} provider→model links for {MODEL_OVERRIDES_PATH.name}"
         )
 
 
@@ -970,7 +1025,7 @@ def create_enriched_view(con: duckdb.DuckDBPyConnection) -> None:
             a.*,
             m.id AS modelsdev_id,
             m.provider_id AS modelsdev_provider_id,
-            m.open_weights,
+            COALESCE(mo.open_weights, m.open_weights, FALSE) AS open_weights,
             m.context_window AS modelsdev_context_window,
             m.weights_urls,
             m.input_modalities AS modelsdev_input_modalities,
@@ -993,6 +1048,7 @@ def create_enriched_view(con: duckdb.DuckDBPyConnection) -> None:
         LEFT JOIN aa_modelsdev_matches mdvmatch ON mdvmatch.aa_model_id = a.id
         LEFT JOIN modelsdev_models m ON m.id = mdvmatch.modelsdev_id
         LEFT JOIN modelsdev_providers p ON p.id = m.provider_id
+        LEFT JOIN model_overrides mo ON mo.slug = a.slug
         LEFT JOIN aa_neuralwatt_matches nwmatch ON nwmatch.aa_model_id = a.id
         LEFT JOIN neuralwatt_models nw ON nw.id = nwmatch.neuralwatt_model_id
         LEFT JOIN neuralwatt_energy nwe
@@ -1017,10 +1073,28 @@ def build_provider_type_map(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
             "SELECT DISTINCT provider_id FROM modelsdev_models"
         ).fetchall()
     )
-    model_maker_ids.update({"zai", "alibaba-cn", "minimax-cn", "moonshotai"})
+    model_maker_ids.update(
+        {
+            "zai",
+            "alibaba-cn",
+            "minimax-cn",
+            "moonshotai",
+            "minimax-cn-coding-plan",
+            "minimax-coding-plan",
+            "zhipuai-coding-plan",
+            "alibaba-coding-plan",
+            "alibaba-coding-plan-cn",
+        }
+    )
     proxy_keywords = ["router", "routing", "gateway"]
-    proxy_names = {"nanogpt", "opencode go", "ollama cloud", "hugging face"}
-    proxy_ids = {"nanogpt", "opencode-go", "ollama-cloud", "huggingface"}
+    proxy_names = {
+        "nanogpt",
+        "opencode go",
+        "opencode zen",
+        "ollama cloud",
+        "hugging face",
+    }
+    proxy_ids = {"nanogpt", "opencode-go", "opencode-zenollama-cloud", "huggingface"}
 
     type_map: dict[str, str] = {}
     for pid, pname in providers.items():
@@ -1988,7 +2062,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     <span class="controls-label">HQ location</span>
     <span class="filter-chip" data-ploc="us" data-active="true" tabindex="0">🇺🇸 US</span>
     <span class="filter-chip" data-ploc="cn" data-active="true" tabindex="0">🇨🇳 China</span>
-    <span class="filter-chip" data-ploc="sg" data-active="true" tabindex="0">🇸🇬 Singapore</span>
     <span class="filter-chip" data-ploc="other" data-active="true" tabindex="0">🌍 Other</span>
     <span class="filter-chip" data-ploc="unknown" data-active="true" tabindex="0">❓ Unknown</span>
     <span class="controls-label" style="margin-left:1rem">KV cache</span>
@@ -2491,7 +2564,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         var match;
         if (hq === 'us') match = filters.us;
         else if (hq === 'cn') match = filters.cn;
-        else if (hq === 'sg') match = filters.sg;
         else if (hq === 'unknown') match = filters.unknown;
         else match = filters.other;
         if (match) {{
@@ -2624,6 +2696,15 @@ def main() -> int:
             load_provider_overrides(con)
         except Exception as exc:
             print(f"WARN: Provider overrides load failed: {exc}", file=sys.stderr)
+
+    # 3e. Model overrides — open_weights corrections for models whose models.dev
+    #     metadata is missing or stale (e.g. Mistral Medium 3.5).
+    if not args.no_modelsdev:
+        try:
+            load_model_overrides(con)
+            create_enriched_view(con)
+        except Exception as exc:
+            print(f"WARN: Model overrides load failed: {exc}", file=sys.stderr)
 
     # 4. Top 10 demo (console + HTML)
     print_top10_agentic(con)

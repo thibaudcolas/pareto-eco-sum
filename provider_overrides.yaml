@@ -30,6 +30,11 @@
   headquarters: US
   datacenters: US
 
+- id: berget
+  name: Berget.AI
+  headquarters: SE
+  datacenters: SE
+
 # TensorX is not in models.dev or OpenRouter. IE HQ, IE + FI DCs.
 # Static model catalog scraped from https://tensorx.ai/models/ (server-
 # rendered HTML, no JSON API). Updated manually when the page changes.

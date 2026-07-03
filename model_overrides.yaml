@@ -1,0 +1,28 @@
+# Model-level overrides for the open-weight LLM landscape report.
+#
+# Each entry is a dict keyed by AA slug (as it appears in Artificial Analysis).
+# Fields override the corresponding values from models.dev (or fill in missing
+# ones when no models.dev match exists).
+#
+# Supported fields:
+#   slug          AA slug (required — must match aa_models.slug)
+#   open_weights  Override open_weights when models.dev metadata is missing or
+#                 stale (bool)
+#   providers     List of provider IDs (strings) whose model slug differs from
+#                 the AA slug (e.g. includes a parameter count). Each provider
+#                 must exist in models.dev or provider_overrides.yaml. A
+#                 provider→model link is injected so the model shows as offered
+#                 by that provider in the report.
+#
+# Example:
+#   - slug: mistral-medium-3-5
+#     open_weights: true
+#     providers:
+#       - scaleway
+#       - berget
+#
+- slug: mistral-medium-3-5
+  open_weights: true
+  providers:
+    - scaleway
+    - berget
