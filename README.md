@@ -1,6 +1,6 @@
-# Pareto eco sum
+# [Pareto eco sum - Open-weight LLM landscape](https://pareto-eco-sum.netlify.app/)
 
-Working title. Data-driven exploration of open weight AI models and providers.
+Data-driven exploration of open weight AI models and providers, based on performance x cost x energy use.
 
 ## Overview
 
@@ -71,20 +71,20 @@ Fetches the Neuralwatt API (`/v1/models`) and scrapes the energy-pricing table f
 
 ## DuckDB schema
 
-| Table                                | Source             | Rows  | Notes                                                              |
-| ------------------------------------ | ------------------ | ----: | ------------------------------------------------------------------ |
-| `aa_models`                          | Artificial Analysis |   511 | Evaluations, pricing, performance per model                        |
-| `modelsdev_providers`                | models.dev         |   144 | Provider metadata (id, name, api base, doc url)                    |
-| `modelsdev_models`                   | models.dev         |   220 | Canonical model entries; `open_weights`, `context_window`, modalities |
-| `modelsdev_provider_models`          | models.dev         | 5,335 | Junction: every (provider, model) pair from the catalog            |
-| `aa_modelsdev_matches`               | computed           |   511 | Best models.dev match per AA model                                 |
-| `neuralwatt_models`                  | Neuralwatt API     |    12 | NW pricing, capabilities, limits                                   |
-| `neuralwatt_energy`                  | Neuralwatt portal |    84 | LONG format: (model, band) → energy_mwh, cache_hit_rate, req_pct   |
-| `aa_neuralwatt_matches`              | computed           |   511 | Best Neuralwatt match per AA model                                 |
-| `openrouter_providers`               | OpenRouter API     |    86 | HQ, datacenters, domain per provider                               |
-| `models_enriched` (view)             | join               |   511 | AA + models.dev + Neuralwatt + OpenRouter all joined               |
-| `fetch_runs`                         | internal           |    31 | AA fetch audit log                                                 |
-| `fetch_runs_neuralwatt`              | internal           |     2 | Neuralwatt fetch audit log                                          |
+| Table                       | Source              |  Rows | Notes                                                                 |
+| --------------------------- | ------------------- | ----: | --------------------------------------------------------------------- |
+| `aa_models`                 | Artificial Analysis |   511 | Evaluations, pricing, performance per model                           |
+| `modelsdev_providers`       | models.dev          |   144 | Provider metadata (id, name, api base, doc url)                       |
+| `modelsdev_models`          | models.dev          |   220 | Canonical model entries; `open_weights`, `context_window`, modalities |
+| `modelsdev_provider_models` | models.dev          | 5,335 | Junction: every (provider, model) pair from the catalog               |
+| `aa_modelsdev_matches`      | computed            |   511 | Best models.dev match per AA model                                    |
+| `neuralwatt_models`         | Neuralwatt API      |    12 | NW pricing, capabilities, limits                                      |
+| `neuralwatt_energy`         | Neuralwatt portal   |    84 | LONG format: (model, band) → energy_mwh, cache_hit_rate, req_pct      |
+| `aa_neuralwatt_matches`     | computed            |   511 | Best Neuralwatt match per AA model                                    |
+| `openrouter_providers`      | OpenRouter API      |    86 | HQ, datacenters, domain per provider                                  |
+| `models_enriched` (view)    | join                |   511 | AA + models.dev + Neuralwatt + OpenRouter all joined                  |
+| `fetch_runs`                | internal            |    31 | AA fetch audit log                                                    |
+| `fetch_runs_neuralwatt`     | internal            |     2 | Neuralwatt fetch audit log                                            |
 
 All tables are exported to Parquet in `data/parquet/`.
 
