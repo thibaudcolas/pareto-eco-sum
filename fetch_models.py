@@ -608,7 +608,18 @@ def load_aa_models(
     tier = payload.get("tier")
 
     rows: list[tuple] = []
+    seen_ids: set[str] = set()
     for m in payload.get("data", []):
+        # The AA API occasionally returns duplicate entries for the same model
+        # id (same fields, differing performance snapshots). Keep the first.
+        mid = m.get("id")
+        if mid in seen_ids:
+            print(
+                f"  Warning: duplicate AA model id {mid} ({m.get('slug')}) in "
+                "payload; keeping first occurrence"
+            )
+            continue
+        seen_ids.add(mid)
         creator = m.get("model_creator") or {}
         evals = m.get("evaluations") or {}
         cost = m.get("artificial_analysis_intelligence_index_cost") or {}
