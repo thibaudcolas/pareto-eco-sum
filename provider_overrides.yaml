@@ -46,6 +46,10 @@
   doc_url: https://docs.tensorx.ai/
   api_base: https://tensorx.ai/models/
   models:
+    - slug: glm-5-3-flash
+      input: 0.20
+      cache_read: 0.05
+      output: 0.50
     - slug: glm-5-2
       input: 1.50
       cache_read: 0.38

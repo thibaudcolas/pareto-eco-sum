@@ -26,3 +26,11 @@
   providers:
     - scaleway
     - berget
+
+# models.dev lists zhipuai/glm-5.3-flash with open_weights: false, which is
+# stale — it is open-weight. Neuralwatt runs it but its API doesn't list it
+# yet, so the link is injected manually (listing only; no NW pricing/energy).
+- slug: glm-5-3-flash
+  open_weights: true
+  providers:
+    - neuralwatt
