@@ -16,23 +16,18 @@ The script:
   3. Loads both into a DuckDB file at data/pareto.duckdb
   4. Joins AA models to models.dev models on a normalized slug
   5. Prints the top 10 models by Artificial Analysis Agentic Index
-  6. Renders data/index.html — an interactive report with scatter plots,
-     model cards, and a provider directory for open-weight LLMs.
+  6. Exports JSON data snapshots to src/data/ for the Astro site —
+     scatter data, model cards, provider directory, and colors.
 
 Caching and API budget
 -----------------------
 The Free tier allows 100 requests/day. Each page of the AA endpoint counts as one
 request. The script writes a merged JSON cache to data/cache/language_models_free_latest.json
-and reuses it for 24 hours unless --force-refresh is passed. Use --no-fetch to skip the
-network entirely and fall back to sample.json.
 
 Usage
------
-  ./fetch_models.py                 # full pipeline: fetch AA, fetch models.dev, HTML
-  ./fetch_models.py --no-fetch      # use cached or sample.json, skip AA API
-  ./fetch_models.py --force-refresh # ignore cache TTL, re-fetch from both APIs
-  ./fetch_models.py --no-modelsdev  # skip models.dev fetch and enrichment
-  ./fetch_models.py --no-html       # skip HTML report
+  ./fetch_models.py                 # full pipeline: fetch AA, fetch models.dev, export site JSON
+  ./fetch_models.py --no-fetch      # skip AA API; use cached data if present (even if
+                                    # stale), else sample.json
 """
 
 from __future__ import annotations
@@ -46,7 +41,6 @@ import os
 import sys
 import time
 from datetime import date, datetime, timezone
-from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +56,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR / "data"
 CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "pareto.duckdb"
-HTML_PATH = DATA_DIR / "index.html"
+SITE_DATA_DIR = SCRIPT_DIR / "src" / "data"
 
 AA_BASE_URL = "https://artificialanalysis.ai/api/v2"
 AA_ENDPOINT = "/language/models/free"
@@ -71,7 +65,7 @@ MODELSDEV_CATALOG_URL = "https://models.dev/catalog.json"
 MODELSDEV_LOGOS_BASE = "https://models.dev/logos"
 
 OPENROUTER_PROVIDERS_URL = "https://openrouter.ai/api/v1/providers"
-GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain="
+
 
 # --------------------------------------------------------------------------- #
 # Provider overrides
@@ -106,8 +100,6 @@ with MODEL_OVERRIDES_PATH.open() as _f:
 CACHE_TTL_SECONDS = 24 * 3600
 REQUEST_TIMEOUT = 30.0
 SAMPLE_FILE = SCRIPT_DIR / "sample.json"
-
-OBSERVABLE_PLOT_VERSION = "0.6.16"
 
 # Brand-aligned colors per provider id (from models.dev). Providers not in
 # this map fall back to a position in FALLBACK_PALETTE below.
@@ -222,10 +214,6 @@ def fetch_aa_models(
             resp.raise_for_status()
 
             payload = resp.json()
-            (
-                CACHE_DIR
-                / f"aa_language_models_free_page{page}_{datetime.now():%Y%m%d_%H%M%S}.json"
-            ).write_text(json.dumps(payload, indent=2))
 
             if not meta:
                 meta = {
@@ -352,6 +340,11 @@ def normalize_slug(slug: str | None) -> str | None:
     if not slug:
         return None
     return slug.lower().replace(".", "-")
+
+
+def _ptype_key(ptype: str) -> str:
+    """Map a display provider type to its machine key for filtering."""
+    return {"Proxy": "proxy", "Model maker": "model-maker"}.get(ptype, "other")
 
 
 # --------------------------------------------------------------------------- #
@@ -981,16 +974,6 @@ def compute_aa_neuralwatt_matches(con: duckdb.DuckDBPyConnection) -> None:
         aa_name_l = aa_name.lower()
         chosen: tuple[str | None, str | None, str | None] = (None, None, None)
 
-        # Prefer exact, then starts-with (longest display_name wins for specificity).
-        def pick(candidates: list[tuple[str, bool]]) -> tuple[str, str, str]:
-            base = [c for c in candidates if c[1]]
-            chosen_list = base if base else candidates
-            return (
-                chosen_list[0][0],
-                None,
-                None,
-            )  # display_name not available here; just return id.
-
         # Strategy 1: exact name match.
         candidates = by_name.get(aa_name_l)
         if candidates:
@@ -1046,7 +1029,6 @@ def create_enriched_view(con: duckdb.DuckDBPyConnection) -> None:
             p.name AS modelsdev_provider_name,
             mdvmatch.match_type AS modelsdev_match_type,
             nw.id AS nw_model_id,
-            nw.display_name AS nw_display_name,
             nw.provider AS nw_provider,
             nw.huggingface_id AS nw_huggingface_id,
             nw.pricing_input_per_million AS nw_input_per_million,
@@ -1070,12 +1052,13 @@ def create_enriched_view(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def build_provider_type_map(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
-    """Map provider id -> type: Proxy, Model maker, or Other.
+    """Map provider id -> display type: Proxy, Model maker, or Other.
 
     Proxies are providers whose name/id contains "router"/"routing"/"gateway",
     or are known proxy services (NanoGPT, OpenCode Go, Ollama Cloud).
     Model makers are providers that appear as the creator of at least one model
     in the models.dev catalog.
+    Exports use _ptype_key() machine keys (proxy / model-maker / other).
     """
     providers = dict(con.execute("SELECT id, name FROM modelsdev_providers").fetchall())
     model_maker_ids = set(
@@ -1149,7 +1132,25 @@ def print_top10_agentic(con: duckdb.DuckDBPyConnection) -> None:
         )
 
 
-def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
+
+def _write_json(path: Path, obj: Any) -> None:
+    path.write_text(
+        json.dumps(obj, separators=(",", ":"), ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
+    """Export JSON data snapshots for the Astro site into src/data/.
+
+    These files are the contract between the Python pipeline and the
+    front-end: every object key is always present (null for missing values)
+    so the site can rely on a stable schema.
+    """
+    SITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # All rows the model cards loop uses (ALL open-weight models with agentic
+    # score AND input + output pricing), ordered by agentic index DESC.
     rows = con.execute(
         """
         SELECT
@@ -1172,7 +1173,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             a.nw_output_per_million,
             a.nw_energy_16k_64k_mwh,
             a.modelsdev_input_modalities,
-            a.modelsdev_output_modalities,
             a.modelsdev_tool_call,
             a.modelsdev_reasoning,
             a.modelsdev_context_window,
@@ -1193,14 +1193,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         """
     ).fetchall()
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not rows:
-        print(
-            "Skipping HTML report: no open-weight models with an agentic index score matched models.dev."
-        )
-        return
-
     # Scatter data: all open-weight models that have an agentic score AND
     # input + output pricing. The 7:2:1 blend weights cache hits heavily; when a
     # model has no published cache-hit price, we fall back to the input price
@@ -1211,7 +1203,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         """
         SELECT
             a.name,
-            a.slug,
             a.model_creator_name,
             a.aa_agentic_index,
             a.aa_coding_index,
@@ -1231,7 +1222,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             COALESCE(p.name, a.model_creator_name) AS provider_name,
             a.weights_urls,
             a.nw_model_id,
-            a.nw_display_name,
             a.nw_input_per_million,
             a.nw_output_per_million,
             a.nw_cached_input_per_million,
@@ -1241,11 +1231,11 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             a.nw_energy_16k_64k_mwh,
             a.nw_cache_hit_rate_16k_64k,
             a.nw_request_share_16k_64k,
-            a.modelsdev_input_modalities,
-            a.modelsdev_output_modalities,
             a.modelsdev_tool_call,
             a.modelsdev_reasoning,
             a.modelsdev_context_window,
+            a.modelsdev_input_modalities,
+            a.modelsdev_output_modalities,
             (
                 SELECT STRING_AGG(DISTINCT COALESCE(orp.headquarters, 'unknown'), ',')
                 FROM modelsdev_provider_models pm2
@@ -1255,14 +1245,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
                   AND pm2.cache_read != 0
                   AND orp.headquarters IS NOT NULL
             ) AS provider_hqs,
-            (
-                SELECT STRING_AGG(DISTINCT COALESCE(orp.headquarters, 'unknown'), ',')
-                FROM modelsdev_provider_models pm3
-                LEFT JOIN openrouter_providers orp ON orp.slug = pm3.provider_id
-                WHERE pm3.slug_normalized = a.slug
-                  AND pm3.cache_read IS NOT NULL
-                  AND pm3.cache_read != 0
-            ) AS provider_hqs_incl_unknown,
             (
                 SELECT COUNT(*) > 0
                 FROM modelsdev_provider_models pm4
@@ -1285,41 +1267,40 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     scatter_data = [
         {
             "name": r[0],
-            "slug": r[1],
-            "creator": r[2],
-            "agentic": r[3],
-            "coding": r[4],
-            "intel": r[5],
-            "input_price": r[6],
-            "output_price": r[7],
-            "cache_hit_price": r[8],
-            "blended_cost": r[9],
-            "cost_per_task": r[10],
-            "tokens_per_second": r[11],
-            "ttft": r[12],
-            "e2e": r[13],
-            "release_date": str(r[14]) if r[14] else None,
-            "provider_id": r[15] or "",
-            "provider_name": r[16] or r[2],
-            "provider_type": provider_type_map.get(r[15] or r[2], "Other"),
-            "weights_url": (r[17].split(",", 1)[0] if r[17] else None),
-            "nw_model_id": r[18],
-            "nw_display_name": r[19],
-            "nw_input_per_million": r[20],
-            "nw_output_per_million": r[21],
-            "nw_cached_input_per_million": r[22],
-            "nw_blended_cost": r[23],
-            "nw_energy_mwh_16k_64k": r[24],
-            "nw_cache_hit_rate_16k_64k": r[25],
-            "nw_request_share_16k_64k": r[26],
-            "input_modalities": r[27] or "",
-            "output_modalities": r[28] or "",
-            "tool_call": r[29],
-            "reasoning": r[30],
-            "context_window": r[31],
-            "provider_hqs": r[32] or "",
-            "provider_hqs_incl_unknown": r[33] or "",
-            "has_cache_priced_provider": bool(r[34]) if r[34] is not None else False,
+            "agentic": r[2],
+            "coding": r[3],
+            "intel": r[4],
+            "input_price": r[5],
+            "output_price": r[6],
+            "cache_hit_price": r[7],
+            "blended_cost": r[8],
+            "cost_per_task": r[9],
+            "tokens_per_second": r[10],
+            "ttft": r[11],
+            "e2e": r[12],
+            "release_date": str(r[13]) if r[13] else None,
+            "release_label": _relative_date(_parse_date(str(r[13]) if r[13] else None)),
+            "provider_id": r[14] or "",
+            "provider_name": r[15] or r[1],
+            "provider_type": _ptype_key(provider_type_map.get(r[14] or r[1], "Other")),
+            "weights_url": (r[16].split(",", 1)[0] if r[16] else None),
+            "nw_model_id": r[17],
+            "nw_input_per_million": r[18],
+            "nw_output_per_million": r[19],
+            "nw_cached_input_per_million": r[20],
+            "nw_blended_cost": r[21],
+            "nw_energy_mwh_16k_64k": r[22],
+            "nw_cache_hit_rate_16k_64k": r[23],
+            "nw_request_share_16k_64k": r[24],
+            "tool_call": r[25],
+            "reasoning": r[26],
+            "context_window": r[27],
+            "input_modalities": r[28] or "",
+            "output_modalities": r[29] or "",
+            "provider_hqs": r[30] or "",
+            "has_cache_priced_provider": bool(r[31]) if r[31] is not None else False,
+            "energy_per_req": None,
+            "nw_energy_estimated_mwh": None,
         }
         for r in scatter_rows
     ]
@@ -1355,7 +1336,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
     nw_scatter_data = [
         {
             "name": r[0],
-            "id": r[1],
             "provider": r[2],
             "input_price": r[3],
             "output_price": r[4],
@@ -1454,19 +1434,6 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             )
             entry["energy_per_req"] = entry["nw_energy_estimated_mwh"]
 
-            # Energy per task: estimate from cost_per_task via regression,
-            # also accounting for the NW/AA cost ratio.
-            cpt = entry.get("cost_per_task")
-            if cpt and cpt > 0:
-                est_cpt_nw = cpt * avg_nw_aa_ratio
-                predicted_task = (
-                    regression["slope"] * est_cpt_nw + regression["intercept"]
-                )
-                entry["energy_per_task_estimated_mwh"] = round(
-                    max(min_energy * 0.5, predicted_task), 2
-                )
-                entry["energy_per_task"] = entry["energy_per_task_estimated_mwh"]
-
     # Provider color map: brand color if known, else derive from the provider's
     # position in the list so each provider gets a stable, distinct color.
     providers_in_data: list[dict[str, str]] = []
@@ -1508,9 +1475,21 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         color_map[pname] = resolved
         nw_provider_idx += 1
 
-    # Each row becomes a card.
-    cards: list[str] = []
-    for i, r in enumerate(rows, 1):
+    legend = [
+        {
+            "id": prov["id"],
+            "name": prov["name"],
+            "color": color_map[prov["pid"]],
+            "logo_url": f"{MODELSDEV_LOGOS_BASE}/{prov['id']}.svg" if prov["id"] else None,
+            "letter": prov["name"][0],
+        }
+        for prov in providers_in_data
+    ]
+
+    # Model cards data: every row the HTML cards loop used, with the resolved
+    # provider color and the relative release label precomputed.
+    model_entries = []
+    for r in rows:
         (
             name,
             slug,
@@ -1531,158 +1510,60 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
             nw_out,
             nw_energy,
             md_input_mods,
-            md_output_mods,
             md_tool_call,
             md_reasoning,
             md_context,
             providers_offering,
         ) = r
-
-        # Resolve provider color for the logo border.
         border_color = (
             color_map.get(provider_id) or color_map.get(provider_name) or "#5b8def"
         )
 
-        if provider_id:
-            logo = (
-                f'<img class="logo" src="{MODELSDEV_LOGOS_BASE}/{escape(provider_id)}.svg" '
-                f'alt="{escape(provider_name)} logo" '
-                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline'\">"
-                f'<span class="logo-fallback" style="display:none">{escape(provider_name[0])}</span>'
-            )
-        else:
-            logo = f'<span class="logo-fallback">{escape((provider_name or "?")[0])}</span>'
-
-        weights_link = ""
-        if weights_urls:
-            first_url = weights_urls.split(",", 1)[0]
-            weights_link = f'<a class="weights" href="{escape(first_url)}" target="_blank" rel="noopener">weights</a>'
-
-        # Neuralwatt energy chip.
-        nw_chip = ""
-        if nw_model_id:
-            energy_str = f"{nw_energy:.2f} mWh" if nw_energy is not None else "—"
-            nw_chip = (
-                f'<span class="nw-chip" title="Neuralwatt · energy per request at the 16k–64k band">'
-                f"⚡ {escape(energy_str)}"
-                f"</span>"
-            )
-
-        # Capability chips.
-        caps: list[str] = []
-        if md_reasoning:
-            caps.append(
-                '<span class="cap-chip cap-reasoning" title="Reasoning">R</span>'
-            )
-        if md_tool_call:
-            caps.append(
-                '<span class="cap-chip cap-tools" title="Tool calling">T</span>'
-            )
-        if md_input_mods:
-            for m in md_input_mods.split(","):
-                m = m.strip()
-                if m:
-                    caps.append(
-                        f'<span class="cap-chip cap-mod" title="Input: {escape(m)}">{escape(m[:3])}</span>'
-                    )
-        ctx_str = (
-            f'<span class="cap-chip cap-ctx" title="Context window">{md_context // 1000 if md_context else "?"}k</span>'
-            if md_context
-            else ""
-        )
-
-        # Provider list: parse the tab-separated \n-delimited aggregate.
-        provider_links: list[str] = []
+        # Provider list: parse the tab-separated \n-delimited aggregate. Entries
+        # without a doc_url keep doc_url=null (the old HTML rendered plain spans).
+        providers_list = []
         if providers_offering:
             for line in providers_offering.split("\n"):
                 parts = line.split("\t")
-                if len(parts) >= 3 and parts[2]:
-                    pid, pname, doc = parts[0], parts[1], parts[2]
-                    provider_links.append(
-                        f'<a class="provider-link" href="{escape(doc)}" target="_blank" rel="noopener" title="{escape(pname)} docs">{escape(pname)}</a>'
+                if len(parts) >= 2 and parts[1]:
+                    providers_list.append(
+                        {
+                            "id": parts[0],
+                            "name": parts[1],
+                            "doc_url": parts[2] if len(parts) >= 3 and parts[2] else None,
+                        }
                     )
-                elif len(parts) >= 2 and parts[1]:
-                    provider_links.append(
-                        f'<span class="provider-link">{escape(parts[1])}</span>'
-                    )
-        providers_html = ""
-        if provider_links:
-            providers_html = (
-                f'<div class="card-providers">'
-                f'<span class="providers-label">{len(provider_links)} providers:</span>'
-                f"{''.join(provider_links)}"
-                f"</div>"
-            )
 
-        cards.append(f"""
-        <article class="card" style="--rank:{i}">
-          <div class="rank">#{i}</div>
-          <div class="logo-wrap" style="border: 2px solid {border_color}; box-shadow: 0 0 0 1px {border_color}33;">{logo}</div>
-          <div class="info">
-            <h2>{escape(name)}</h2>
-            <div class="creator">{escape(provider_name)}{weights_link and f" · {weights_link}"}</div>
-            <div class="meta">
-              <span>released {_relative_date(_parse_date(str(release) if release else None))}</span>
-              <span>slug: <code>{escape(slug)}</code></span>
-              {ctx_str}
-              {"".join(caps)}
-              {nw_chip}
-            </div>
-            {providers_html}
-          </div>
-          <div class="score-wrap">
-            <div class="score agentic" title="Artificial Analysis Agentic Index">
-              <div class="score-value">{agentic:.2f}</div>
-              <div class="score-label">agentic</div>
-            </div>
-            <div class="secondary-scores">
-              <div><span>coding</span><b>{coding:.1f}</b></div>
-              <div><span>intel.</span><b>{intel:.1f}</b></div>
-            </div>
-          </div>
-          <div class="stats">
-            <div><span>blended $/1M</span><b>{f"${(7 * (p_cache or p_in) + 2 * p_in + p_out) / 10:.2f}" if p_in is not None else "—"}</b></div>
-            <div><span>tokens/s</span><b>{f"{tps:.0f}" if tps is not None else "—"}</b></div>
-          </div>
-        </article>""")
-
-    # Custom HTML legend: provider logo + colored swatch + name.
-    legend_items: list[str] = []
-    for prov in providers_in_data:
-        pid = prov["id"]
-        pname = prov["name"]
-        color = color_map[prov["pid"]]
-        if pid:
-            logo_html = (
-                f'<img src="{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg" alt="{escape(pname)}" '
-                f'title="{escape(pname)}" loading="lazy" '
-                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline-block'\">"
-                f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
-            )
-        else:
-            logo_html = f'<span class="logo-letter">{escape(pname[0])}</span>'
-        legend_items.append(
-            f'<span class="legend-item" data-provider="{escape(pid or pname)}">'
-            f'<span class="swatch" style="background:{color}"></span>'
-            f'<span class="legend-logo" style="background:{color}20">{logo_html}</span>'
-            f'<span class="legend-name">{escape(pname)}</span>'
-            f"</span>"
-        )
-
-    json_blob = json.dumps(scatter_data, separators=(",", ":"))
-    color_map_json = json.dumps(color_map, separators=(",", ":"))
-    providers_json = json.dumps(
-        [
+        model_entries.append(
             {
-                "id": p["id"] or p["name"],
-                "name": p["name"],
-                "color": color_map[p["pid"]],
+                "name": name,
+                "slug": slug,
+                "provider_name": provider_name,
+                "provider_id": provider_id,
+                "color": border_color,
+                "release_label": _relative_date(
+                    _parse_date(str(release) if release else None)
+                ),
+                "agentic": agentic,
+                "coding": coding,
+                "intel": intel,
+                "blended_cost": (
+                    7 * (p_cache if p_cache is not None else p_in) + 2 * p_in + p_out
+                )
+                / 10
+                if p_in is not None
+                else None,
+                "tokens_per_second": tps,
+                "weights_url": (weights_urls.split(",", 1)[0] if weights_urls else None),
+                "nw_model_id": nw_model_id,
+                "nw_energy_mwh": nw_energy if nw_model_id else None,
+                "input_modalities": md_input_mods or "",
+                "tool_call": md_tool_call,
+                "reasoning": md_reasoning,
+                "context_window": md_context,
+                "providers": providers_list,
             }
-            for p in providers_in_data
-        ],
-        separators=(",", ":"),
-    )
-    plot_build_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        )
 
     # Provider section: all providers that offer at least one open-weight model
     # in our scatter dataset, with count of such models. LEFT JOIN OpenRouter
@@ -1713,7 +1594,8 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         ORDER BY open_weight_model_count DESC, p.name
         """
     ).fetchall()
-    provider_cards: list[str] = []
+
+    provider_entries = []
     for (
         pid,
         pname,
@@ -1724,7 +1606,7 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         or_domain,
         has_cache_read,
     ) in provider_section_rows:
-        ptype = provider_type_map.get(pid, "Other")
+        ptype_key = _ptype_key(provider_type_map.get(pid, "Other"))
         color = color_map.get(pid) or color_map.get(pname) or "#5b8def"
 
         # Derive a domain for the favicon: prefer OpenRouter-derived domain,
@@ -1733,881 +1615,51 @@ def render_top10_open_html(con: duckdb.DuckDBPyConnection) -> None:
         if not domain and doc_url:
             domain = doc_url.split("//", 1)[-1].split("/", 1)[0].replace("www.", "")
 
-        # Favicon from Google's service, with models.dev logo as fallback.
-        if domain:
-            logo_html = (
-                (
-                    f'<img src="{GOOGLE_FAVICONS_URL}{escape(domain)}" alt="{escape(pname)}" loading="lazy" '
-                    f"onerror=\"this.onerror=null;this.src='{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg';"
-                    f"this.nextElementSibling.style.display='inline-block'\">"
-                    f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
-                )
-                if pid
-                else (
-                    f'<img src="{GOOGLE_FAVICONS_URL}{escape(domain)}" alt="{escape(pname)}" loading="lazy" '
-                    f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline-block'\">"
-                    f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
-                )
-            )
-        elif pid:
-            logo_html = (
-                f'<img src="{MODELSDEV_LOGOS_BASE}/{escape(pid)}.svg" alt="{escape(pname)}" loading="lazy" '
-                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='inline-block'\">"
-                f'<span class="logo-letter" style="display:none">{escape(pname[0])}</span>'
-            )
-        else:
-            logo_html = f'<span class="logo-letter">{escape(pname[0])}</span>'
-
-        # Location badges: HQ flag + datacenter flags.
-        loc_badges = ""
-        if hq:
-            loc_badges += f'<span class="loc-badge" title="Headquarters: {escape(hq)}">{_country_flag(hq)} {escape(hq)}</span>'
+        # Datacenters: deduplicate case-insensitively, exclude HQ (already shown).
+        datacenters = []
         if dcs:
-            dc_list = [d.strip() for d in dcs.split(",") if d.strip()]
-            # Deduplicate, exclude HQ (already shown).
             seen = {hq.upper()} if hq else set()
-            dc_flags = []
-            for dc in dc_list:
-                if dc.upper() not in seen:
-                    dc_flags.append(
-                        f'<span class="loc-badge loc-dc" title="Datacenter: {escape(dc)}">{_country_flag(dc)} {escape(dc)}</span>'
-                    )
+            for dc in (d.strip() for d in dcs.split(",")):
+                if dc and dc.upper() not in seen:
                     seen.add(dc.upper())
-            if dc_flags:
-                loc_badges += "".join(dc_flags)
+                    datacenters.append({"code": dc, "flag": _country_flag(dc)})
 
-        link = f'href="{escape(doc_url)}"' if doc_url else ""
-        tag = "a" if doc_url else "span"
-        hq_attr = hq or "unknown"
-        cache_attr = "priced" if has_cache_read else "all"
-        provider_cards.append(
-            f'<{tag} class="provider-card" data-hq="{escape(hq_attr.lower())}" data-cache="{cache_attr}" data-ptype="{escape(ptype.lower().replace(" ", "-"))}" {link} target="_blank" rel="noopener" '
-            f'style="border-color: {color}33;">'
-            f'<span class="provider-card-logo" style="background: {color}20;">{logo_html}</span>'
-            f'<span class="provider-card-info">'
-            f'<span class="provider-card-name">{escape(pname)}</span>'
-            f"{loc_badges}"
-            f"</span>"
-            f'<span class="provider-card-count" style="color: {color};">{count}</span>'
-            f"</{tag}>"
+        provider_entries.append(
+            {
+                "id": pid,
+                "name": pname,
+                "doc_url": doc_url,
+                "count": count,
+                "hq": hq,
+                "hq_flag": _country_flag(hq) if hq else None,
+                "datacenters": datacenters,
+                "domain": domain,
+                "has_cache_read": bool(has_cache_read),
+                "ptype_key": ptype_key,
+                "color": color,
+            }
         )
 
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Open-weight LLM landscape — benchmarks, pricing & energy</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root {{
-    --bg: #0c1018; --surface: #141b27; --surface-2: #1b2434;
-    --text: #e6edf3; --muted: #8b97a8; --accent: #5b8def;
-    --agentic: #2dd4bf; --coding: #60a5fa; --intel: #c084fc;
-    --border: #243044;
-  }}
-  * {{ box-sizing: border-box; }}
-  body {{
-    background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system,
-      "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; line-height: 1.4; padding: 2rem 1rem;
-  }}
-  .container {{ max-width: 1180px; margin: 0 auto; }}
-  header {{ margin-bottom: 2rem; }}
-  h1 {{ margin: 0 0 0.4rem; font-size: 1.7rem; }}
-  h2.section {{ font-size: 1.15rem; margin: 2.5rem 0 0.8rem; letter-spacing: 0.02em;
-    scroll-margin-top: 1rem; }}
-  .anchor {{ color: var(--muted); text-decoration: none; margin-right: 0.4rem; font-weight: 400; }}
-  .anchor:hover {{ color: var(--accent); }}
-  header p {{ color: var(--muted); margin: 0.3rem 0; font-size: 0.95rem; }}
-  header a {{ color: var(--accent); }}
-  .legend {{ display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-top: 0.6rem; }}
-  .legend .swatch {{ display: inline-block; width: 0.8em; height: 0.8em; border-radius: 3px; margin-right: 0.3em; vertical-align: middle; }}
-  .scatter-wrap {{
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.2rem 1.4rem;
-    margin-top: 0.5rem;
-  }}
-  #scatter-plot {{ width: 100%; overflow: visible; }}
-  #scatter-plot svg {{ width: 100%; height: auto; font-family: inherit; }}
-  .plot-note {{ color: var(--muted); font-size: 0.8rem; margin-top: 0.6rem; }}
-  /* Custom provider legend for the scatter plot. */
-  .provider-legend {{
-    display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin: 0.8rem 0 1.2rem; font-size: 0.85rem;
-  }}
-  .legend-item {{ display: inline-flex; align-items: center; gap: 0.35rem; cursor: default;
-    padding: 0.15rem 0.5rem 0.15rem 0.35rem; border-radius: 999px;
-    border: 1px solid var(--border); background: var(--surface-2); }}
-  .legend-item:hover {{ border-color: var(--accent); }}
-  .legend-item .swatch {{ width: 0.7em; height: 0.7em; border-radius: 999px; flex: none; }}
-  .legend-logo {{
-    width: 20px; height: 20px; border-radius: 4px; overflow: hidden;
-    display: inline-flex; align-items: center; justify-content: center; flex: none;
-  }}
-  .legend-logo img {{ width: 16px; height: 16px; object-fit: contain; }}
-  .logo-letter {{ font-weight: 700; font-size: 0.8rem; color: var(--text); }}
-  .legend-name {{ color: var(--text); }}
-  /* Top 10 cards. */
-  .top10 {{ display: grid; gap: 0.8rem; }}
-  .card {{
-    display: grid; grid-template-columns: auto 64px 1fr auto; gap: 1rem; align-items: center;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1rem 1.2rem; transition: transform 0.1s ease;
-  }}
-  .card:hover {{ transform: translateY(-1px); border-color: var(--accent); }}
-  .rank {{ font-weight: 700; color: var(--muted); font-size: 1.1rem; min-width: 2rem; }}
-  .logo-wrap {{ display: flex; align-items: center; justify-content: center; width: 64px; height: 64px;
-    background: var(--surface-2); border-radius: 10px; overflow: hidden; }}
-  .logo {{ width: 40px; height: 40px; object-fit: contain; }}
-  .logo-fallback {{ width: 100%; text-align: center; font-weight: 700; font-size: 1.5rem; color: var(--accent); }}
-  .info {{ min-width: 0; }}
-  .info h2 {{ margin: 0; font-size: 1.05rem; }}
-  .creator {{ color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; }}
-  .creator .weights {{ margin-left: 0.4rem; }}
-  .meta {{ font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; display: flex; gap: 0.8rem; flex-wrap: wrap; }}
-  .meta code {{ background: var(--surface-2); padding: 0 0.3em; border-radius: 3px; font-size: 0.85em; }}
-  .nw-chip {{ background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent);
-    padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
-    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); display: inline-block; }}
-  .cap-chip {{ padding: 0.05rem 0.35rem; border-radius: 4px; font-size: 0.68rem; font-weight: 700;
-    display: inline-block; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }}
-  .cap-reasoning {{ color: var(--intel); border-color: color-mix(in srgb, var(--intel) 40%, transparent); }}
-  .cap-tools {{ color: var(--coding); border-color: color-mix(in srgb, var(--coding) 40%, transparent); }}
-  .cap-mod {{ text-transform: capitalize; }}
-  .cap-ctx {{ font-weight: 600; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }}
-  .card-providers {{ margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; align-items: center; }}
-  .providers-label {{ font-size: 0.7rem; color: var(--muted); margin-right: 0.2rem; }}
-  .provider-link {{ font-size: 0.72rem; color: var(--accent); text-decoration: none; padding: 0.05rem 0.35rem;
-    border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); display: inline-block; }}
-  .provider-link:hover {{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }}
-  /* Providers section */
-  .providers-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.6rem; }}
-  .provider-card {{ display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.8rem;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    text-decoration: none; color: var(--text); transition: border-color 0.1s, transform 0.1s; }}
-  .provider-card:hover {{ transform: translateY(-1px); border-color: var(--accent); }}
-  .provider-card-logo {{ width: 28px; height: 28px; border-radius: 6px; overflow: hidden;
-    display: inline-flex; align-items: center; justify-content: center; flex: none; }}
-  .provider-card-logo img {{ width: 20px; height: 20px; object-fit: contain; }}
-  .provider-card-info {{ flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }}
-  .provider-card-name {{ font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-  .provider-card-count {{ font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }}
-  .loc-badge {{ font-size: 0.65rem; font-weight: 600; padding: 0.05rem 0.3rem; border-radius: 3px;
-    background: var(--surface-2); color: var(--muted); display: inline-flex; align-items: center; gap: 0.15rem; }}
-  .loc-dc {{ opacity: 0.7; }}
-  .score-wrap {{ display: flex; align-items: center; gap: 0.8rem; }}
-  .score.agentic {{ text-align: center; min-width: 80px; }}
-  .score-value {{ font-size: 1.6rem; font-weight: 700; color: var(--agentic); }}
-  .score-label {{ font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }}
-  .secondary-scores {{ display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.75rem; }}
-  .secondary-scores div {{ display: flex; justify-content: space-between; gap: 0.5rem; color: var(--muted); }}
-  .secondary-scores b {{ color: var(--text); }}
-  .stats {{
-    display: none; grid-template-columns: repeat(2, minmax(80px, auto)); gap: 0.4rem 1rem;
-    border-left: 1px solid var(--border); padding-left: 1rem;
-  }}
-  .stats div {{ display: flex; flex-direction: column; font-size: 0.75rem; color: var(--muted); }}
-  .stats b {{ color: var(--text); font-size: 0.9rem; }}
-  @media (min-width: 820px) {{ .stats {{ display: grid; }} }}
-  footer {{ color: var(--muted); font-size: 0.8rem; margin-top: 2rem; text-align: center; }}
-  footer a {{ color: var(--accent); }}
-  /* Floating custom tooltip bound to scatter dots. */
-  .tooltip-popup {{
-    position: fixed; z-index: 100; display: none;
-    background: var(--surface-2); border: 1px solid var(--accent);
-    border-radius: 8px; padding: 0.65rem 0.85rem; font-size: 0.8rem;
-    min-width: 240px; max-width: 340px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.55);
-    pointer-events: none; color: var(--text); line-height: 1.35;
-  }}
-  .tooltip-popup .tip-title {{ font-weight: 700; margin-bottom: 2px; }}
-  .tooltip-popup .tip-provider {{ color: var(--muted); margin-bottom: 6px; }}
-  .tooltip-popup .tip-row {{ display: flex; justify-content: space-between; gap: 1.2em; }}
-  .tooltip-popup .tip-key {{ color: var(--muted); }}
-  .tooltip-popup .tip-val {{ font-variant-numeric: tabular-nums; }}
-  .tooltip-popup .tip-indent {{ padding-left: 0.8em; color: var(--muted); }}
-  /* Segmented control for selecting the Y-axis metric. */
-  .scatter-controls {{
-    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-    margin-bottom: 0.6rem;
-  }}
-  .scatter-controls .controls-label {{
-    color: var(--muted); font-size: 0.8rem; text-transform: uppercase;
-    letter-spacing: 0.05em; margin-right: 0.2rem;
-  }}
-  .metric-radio {{ display: inline-flex; align-items: center; cursor: pointer;
-    padding: 0.25rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
-    background: var(--surface-2); font-size: 0.85rem; user-select: none;
-    transition: border-color 0.1s, background 0.1s; }}
-  .metric-radio:hover {{ border-color: var(--accent); }}
-  .metric-radio input {{ position: absolute; opacity: 0; pointer-events: none; }}
-  .metric-radio .swatch {{
-    display: inline-block; width: 0.6em; height: 0.6em; border-radius: 999px;
-    margin-right: 0.35em; background: currentColor;
-  }}
-  .metric-radio[data-active="true"] {{ border-color: currentColor; background: color-mix(in srgb, currentColor 18%, transparent); }}
-  .metric-radio[data-metric="agentic"] {{ color: var(--agentic); }}
-  .metric-radio[data-metric="coding"] {{ color: var(--coding); }}
-  .metric-radio[data-metric="intel"] {{ color: var(--intel); }}
-  .metric-radio.x-metric {{ color: var(--accent); }}
-  .filter-chip {{ display: inline-flex; align-items: center; cursor: pointer;
-    padding: 0.25rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
-    background: var(--surface-2); font-size: 0.85rem; user-select: none;
-    transition: border-color 0.1s, background 0.1s; }}
-  .filter-chip:hover {{ border-color: var(--accent); }}
-  .filter-chip input {{ position: absolute; opacity: 0; pointer-events: none; }}
-  .filter-chip[data-active="true"] {{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }}
-  .filter-chip[data-active="false"] {{ opacity: 0.4; }}
-  .provider-filters {{ display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-    margin-bottom: 0.6rem; }}
-  /* Observable Plot theme tweaks to match the dark UI. */
-  #scatter-plot svg .plot text {{ fill: var(--text); }}
-  #scatter-plot svg .plot .axis text {{ fill: var(--muted); }}
-  #scatter-plot svg .plot .axis line, #scatter-plot svg .plot .grid line {{ stroke: var(--border); }}
-  #scatter-plot svg .plot .axis title {{ fill: var(--muted); }}
-  #scatter-plot svg .plot .tip {{ fill: var(--surface-2); stroke: var(--border); }}
-  #scatter-plot svg .plot .tip text {{ fill: var(--text); font-size: 0.8rem; }}
-</style>
-</head>
-<body>
-<div class="container">
-  <header>
-    <h1 id="top">Open-weight LLM landscape</h1>
-    <p>Comparing benchmark scores, pricing, and energy use across open-weight language models and their providers.</p>
-    <p>Built with <a href="https://artificialanalysis.ai/models/glm-5-2" target="_blank" rel="noopener">GLM-5.2</a> on
-       <a href="https://neuralwatt.com" target="_blank" rel="noopener">Neuralwatt</a> ·
-       <span title="Total energy and carbon cost of building this report">1.60 kWh · 193.7 g CO₂</span> ·
-       Data: <a href="https://artificialanalysis.ai/api/v2/language/models/free">Artificial Analysis</a> ·
-       <a href="https://models.dev/catalog.json">models.dev</a> ·
-       <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt</a> ·
-       <a href="https://openrouter.ai/api/v1/providers">OpenRouter</a> · generated {plot_build_ts}</p>
-   </header>
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Model comparison — {len(scatter_data)} open-weight models</h2>
-  <div class="scatter-wrap">
-    <div class="provider-legend">{"".join(legend_items)}</div>
-    <div class="scatter-controls">
-      <span class="controls-label">X axis</span>
-      <label class="metric-radio x-metric" data-xmetric="blended_cost" data-active="true">
-        <input type="radio" name="xmetric" value="blended_cost" checked>
-        <span>Cost / 1M tok</span>
-      </label>
-      <label class="metric-radio x-metric" data-xmetric="cost_per_task">
-        <input type="radio" name="xmetric" value="cost_per_task">
-        <span>Cost / task</span>
-      </label>
-      <label class="metric-radio x-metric" data-xmetric="energy_per_req">
-        <input type="radio" name="xmetric" value="energy_per_req">
-        <span>Energy / req</span>
-      </label>
-    </div>
-    <div class="scatter-controls">
-      <span class="controls-label">Y axis</span>
-      <label class="metric-radio" data-metric="agentic" data-active="true">
-        <input type="radio" name="metric" value="agentic" checked>
-        <span class="swatch"></span><span>Agentic Index</span>
-      </label>
-      <label class="metric-radio" data-metric="coding">
-        <input type="radio" name="metric" value="coding">
-        <span class="swatch"></span><span>Coding Index</span>
-      </label>
-      <label class="metric-radio" data-metric="intel">
-        <input type="radio" name="metric" value="intel">
-        <span class="swatch"></span><span>Intelligence Index</span>
-      </label>
-    </div>
-    <div class="scatter-controls">
-      <span class="controls-label">Inference provider availability</span>
-      <label class="filter-chip" data-loc="US" data-active="true">
-        <input type="checkbox" checked> 🇺🇸 US
-      </label>
-      <label class="filter-chip" data-loc="CN" data-active="true">
-        <input type="checkbox" checked> 🇨🇳 China
-      </label>
-      <label class="filter-chip" data-loc="other" data-active="true">
-        <input type="checkbox" checked> 🌍 Other
-      </label>
-      <label class="filter-chip" data-loc="unknown" data-active="true">
-        <input type="checkbox" checked> ❓ Unknown
-      </label>
-    </div>
-    <div class="scatter-controls">
-      <span class="controls-label">KV cache</span>
-      <label class="filter-chip" data-kv="priced" data-active="true">
-        <input type="checkbox" checked> 💰 Priced
-      </label>
-      <label class="filter-chip" data-kv="all" data-active="true">
-        <input type="checkbox" checked> ❌ Not priced
-      </label>
-    </div>
-    <div class="scatter-controls">
-      <span class="controls-label">Provider type</span>
-      <label class="filter-chip" data-ptype="model-maker" data-active="true">
-        <input type="checkbox" checked> Model maker
-      </label>
-      <label class="filter-chip" data-ptype="proxy" data-active="true">
-        <input type="checkbox" checked> Proxy
-      </label>
-      <label class="filter-chip" data-ptype="other" data-active="true">
-        <input type="checkbox" checked> Other
-      </label>
-    </div>
-    <div id="scatter-plot"></div>
-    <p class="plot-note">Blended cost = <code>(7·cache + 2·input + 1·output)/10</code>. When a provider omits cache-hit pricing, the input price is used as an upper bound (cache hits are never more expensive than a regular input token). <strong>{len(scatter_data)} models shown</strong>: open-weight (via models.dev), with an Agentic Index score AND input + output pricing. Models without input or output pricing are excluded. Neuralwatt energy values in tooltips are measured when an AA model matches a NW model; otherwise the tooltip shows an <strong>estimated</strong> energy derived from the NW cost ↔ energy regression (see the Neuralwatt scatter below).</p>
-  </div>
+    _write_json(SITE_DATA_DIR / "scatter.json", scatter_data)
+    _write_json(SITE_DATA_DIR / "nw-scatter.json", nw_scatter_data)
+    _write_json(SITE_DATA_DIR / "regression.json", regression)
+    _write_json(SITE_DATA_DIR / "colors.json", color_map)
+    _write_json(SITE_DATA_DIR / "legend.json", legend)
+    _write_json(SITE_DATA_DIR / "models.json", model_entries)
+    _write_json(SITE_DATA_DIR / "providers.json", provider_entries)
+    _write_json(SITE_DATA_DIR / "meta.json", {"generated_at": generated_at})
 
-  <h2 class="section" id="neuralwatt"><a href="#neuralwatt" class="anchor">§</a> Neuralwatt — Energy use vs. cost ({len(nw_scatter_data)} models, 16k–64k band)</h2>
-  <div class="scatter-wrap">
-    <div id="nw-scatter-plot"></div>
-    <p class="plot-note">X: NW blended cost per 1M tokens = <code>(7·cache + 2·input + 1·output)/10</code> (USD, from Neuralwatt pricing).
-       Y: energy per request at the 16k–64k prompt-size band (mWh, scraped from the
-       <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt portal</a>).
-       Dashed line: linear regression on base models only (excluding -fast / -short variants).
-       Hover any dot for details.</p>
-  </div>
-
-  <h2 class="section" id="models"><a href="#models" class="anchor">§</a> Open-weight models — {len(rows)} models by Agentic Index</h2>
-  <section class="top10">{"".join(cards)}
-  </section>
-
-  <h2 class="section" id="providers"><a href="#providers" class="anchor">§</a> Providers ({len(provider_section_rows)})</h2>
-  <p style="color:var(--muted);font-size:0.85rem;margin:0 0 0.8rem;">Providers offering at least one of the {len(rows)} open-weight models above, with count of those models. Click for docs.</p>
-  <div class="provider-filters" id="provider-filters">
-    <span class="controls-label">HQ location</span>
-    <span class="filter-chip" data-ploc="us" data-active="true" tabindex="0">🇺🇸 US</span>
-    <span class="filter-chip" data-ploc="cn" data-active="true" tabindex="0">🇨🇳 China</span>
-    <span class="filter-chip" data-ploc="other" data-active="true" tabindex="0">🌍 Other</span>
-    <span class="filter-chip" data-ploc="unknown" data-active="true" tabindex="0">❓ Unknown</span>
-    <span class="controls-label" style="margin-left:1rem">KV cache</span>
-    <span class="filter-chip" data-cache="priced" data-active="true" tabindex="0">💰 Priced</span>
-    <span class="filter-chip" data-cache="all" data-active="true" tabindex="0">❌ Not priced</span>
-    <span class="controls-label" style="margin-left:1rem">Provider type</span>
-    <span class="filter-chip" data-ptype="model-maker" data-active="true" tabindex="0">Model maker</span>
-    <span class="filter-chip" data-ptype="proxy" data-active="true" tabindex="0">Proxy</span>
-    <span class="filter-chip" data-ptype="other" data-active="true" tabindex="0">Other</span>
-  </div>
-  <div class="providers-grid" id="providers-grid">{"".join(provider_cards)}
-  </div>
-
-  <footer>Logos from models.dev. Scores subject to Intelligence Index version in the AA response; see
-    <a href="https://artificialanalysis.ai/methodology/intelligence-benchmarking">methodology</a>.</footer>
-</div>
-<script type="application/json" id="scatter-data">{json_blob}</script>
-<script type="application/json" id="nw-scatter-data">{json.dumps(nw_scatter_data, separators=(",", ":"))}</script>
-<script type="application/json" id="nw-regression">{json.dumps(regression, separators=(",", ":"))}</script>
-<script type="application/json" id="color-map">{color_map_json}</script>
-<script type="application/json" id="providers-data">{providers_json}</script>
-<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@{OBSERVABLE_PLOT_VERSION}/dist/plot.umd.min.js"></script>
-<script>
-  (function () {{
-    const data = JSON.parse(document.getElementById("scatter-data").textContent);
-    const colorMap = JSON.parse(document.getElementById("color-map").textContent);
-    const providers = JSON.parse(document.getElementById("providers-data").textContent);
-    if (!data.length || typeof Plot === "undefined") {{
-      document.getElementById("scatter-plot").innerHTML =
-        '<p style="color:var(--muted)">No plot data available' +
-        (typeof Plot === "undefined" ? " (Observable Plot failed to load)" : "") + ".</p>";
-      return;
-    }}
-    const colorFor = (pidOrName) => colorMap[pidOrName] || "#5b8def";
-
-    // Metric registries: keys match the radio input values and the JSON fields.
-    const METRICS = {{
-      agentic: {{ field: "agentic", label: "Agentic Index (Artificial Analysis)" }},
-      coding:  {{ field: "coding",  label: "Coding Index (Artificial Analysis)" }},
-      intel:   {{ field: "intel",   label: "Intelligence Index (Artificial Analysis)" }},
-    }};
-    const X_METRICS = {{
-      blended_cost:    {{ field: "blended_cost",  label: "Blended cost / 1M tokens (USD) — 7 cache · 2 input · 1 output", fmt: (d) => "$" + d.toFixed(2) }},
-      cost_per_task:   {{ field: "cost_per_task", label: "Cost per Intelligence Index task (USD)", fmt: (d) => "$" + d.toFixed(2) }},
-      energy_per_req:  {{ field: "energy_per_req",  label: "Energy per request (mWh) — 16k–64k band", fmt: (d) => d + " mWh" }},
-    }};
-
-    const shortName = (name) => {{
-      if (!name) return "";
-      const trimmed = name.replace(/\\s*\\([^)]*\\)\\s*/g, "").trim();
-      const max = 28;
-      return trimmed.length <= max ? trimmed : trimmed.slice(0, max - 1) + "…";
-    }};
-
-    const fmtMoney = (n) => (n == null ? "n/a" : "$" + Number(n).toFixed(2));
-    const fmtNum = (n, d = 2) => (n == null ? "n/a" : Number(n).toFixed(d));
-
-    const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
-      {{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[c]
-    ));
-
-    const relativeDate = (dateStr) => {{
-      if (!dateStr) return "?";
-      const d = new Date(dateStr);
-      if (isNaN(d)) return dateStr;
-      const now = new Date();
-      const days = Math.round((now - d) / 86400000);
-      let rel;
-      if (days < 0) rel = "upcoming";
-      else if (days === 0) rel = "today";
-      else if (days < 7) rel = days + "d ago";
-      else if (days < 30) rel = Math.floor(days / 7) + "w ago";
-      else if (days < 365) rel = Math.floor(days / 30) + "mo ago";
-      else rel = Math.floor(days / 365) + "y ago";
-      return rel + " · " + dateStr.slice(0, 10);
-    }};
-
-    // Build a small HTML tooltip body, highlighting the active Y-metric row.
-    const tipHtml = (d, activeMetric) => {{
-      const rows = [
-        ["Agentic", fmtNum(d.agentic, 2), "agentic"],
-        ["Coding", fmtNum(d.coding, 1), "coding"],
-        ["Intelligence", fmtNum(d.intel, 1), "intel"],
-        ["Blended cost / 1M", fmtMoney(d.blended_cost), null],
-        ["Cost / II task", fmtMoney(d.cost_per_task), null],
-        ["  · cache hit", fmtMoney(d.cache_hit_price), null],
-        ["  · input", fmtMoney(d.input_price), null],
-        ["  · output", fmtMoney(d.output_price), null],
-        ["Tokens/s", d.tokens_per_second != null ? Math.round(d.tokens_per_second) : "n/a", null],
-        ["TTFT (s)", fmtNum(d.ttft, 2), null],
-        ["E2E (s)", fmtNum(d.e2e, 2), null],
-        ["Context", d.context_window ? (d.context_window >= 1000 ? Math.round(d.context_window / 1000) + "k" : d.context_window) : "n/a", null],
-        ["Modalities", (d.input_modalities || "—") + " → " + (d.output_modalities || "—"), null],
-        ["Capabilities", [d.reasoning && "reasoning", d.tool_call && "tools"].filter(Boolean).join(", ") || "—", null],
-        ["Released", relativeDate(d.release_date), null],
-      ];
-      const rowsHtml = rows.map(([k, v, key]) => {{
-        const isActive = key === activeMetric;
-        const style = isActive
-          ? "display:flex;justify-content:space-between;gap:1em;color:var(--text);font-weight:600"
-          : "display:flex;justify-content:space-between;gap:1em";
-        const keyStyle = isActive ? "color:var(--text)" : "color:#8b97a8";
-        return "<div style=\\"" + style + "\\"><span style=\\"" + keyStyle + "\\">" +
-               escapeHtml(k) + "</span><span style=\\"font-variant-numeric:tabular-nums\\">" +
-               escapeHtml(String(v)) + "</span></div>";
-      }}).join("");
-      const linkHtml = d.weights_url
-        ? "<a style=\\"display:block;margin-top:8px;color:var(--accent);text-decoration:none;pointer-events:auto;font-size:0.85rem\\" "
-          + "href=\\"" + escapeHtml(d.weights_url) + "\\" target=\\"_blank\\" rel=\\"noopener\\">"
-          + "View weights on Hugging Face →</a>"
-        : "";
-      // Neuralwatt section — only when an AA model matched a Neuralwatt model.
-      const nwRows = d.nw_model_id ? [
-        ["NW blended cost / 1M", fmtMoney(d.nw_blended_cost)],
-        ["  · input", fmtMoney(d.nw_input_per_million)],
-        ["  · output", fmtMoney(d.nw_output_per_million)],
-        ["  · cached input", fmtMoney(d.nw_cached_input_per_million)],
-        ["Energy @ 16k–64k", d.nw_energy_mwh_16k_64k != null ? fmtNum(d.nw_energy_mwh_16k_64k, 2) + " mWh" : "n/a"],
-        ["  · cache-hit rate", d.nw_cache_hit_rate_16k_64k != null ? fmtNum(d.nw_cache_hit_rate_16k_64k, 0) + "%" : "n/a"],
-        ["  · share of reqs", d.nw_request_share_16k_64k != null ? fmtNum(d.nw_request_share_16k_64k, 1) + "%" : "n/a"],
-      ] : (d.nw_energy_estimated_mwh != null ? [
-        ["Energy @ 16k–64k", "≈ " + fmtNum(d.nw_energy_estimated_mwh, 0) + " mWh (est.)"],
-        ["  · derived from", "NW cost ↔ energy regression"],
-      ] : []);
-      const nwHtml = nwRows.length
-        ? "<div style=\\"margin-top:8px;padding-top:6px;border-top:1px solid #243044\\">" +
-          "<div style=\\"color:#5b8def;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px\\">Neuralwatt</div>" +
-          nwRows.map(([k, v]) =>
-            "<div style=\\"display:flex;justify-content:space-between;gap:1em\\">" +
-            "<span style=\\"color:#8b97a8\\">" + escapeHtml(k) + "</span>" +
-            "<span style=\\"font-variant-numeric:tabular-nums\\">" + escapeHtml(String(v)) + "</span></div>"
-          ).join("") + "</div>"
-        : "";
-      return "<div style=\\"font-weight:600;margin-bottom:4px\\">" + escapeHtml(d.name) + "</div>" +
-        "<div style=\\"color:#8b97a8;margin-bottom:6px\\">" + escapeHtml(d.provider_name) + "</div>" +
-        rowsHtml + nwHtml + linkHtml;
-    }};
-
-    // Shared floating tooltip element reused across renders.
-    const tooltip = document.createElement("div");
-    tooltip.className = "tooltip-popup";
-    document.body.appendChild(tooltip);
-
-    function render(xMetricKey, yMetricKey) {{
-      const yMetric = METRICS[yMetricKey];
-      const xMetric = X_METRICS[xMetricKey];
-      if (!yMetric || !xMetric) return;
-      // Filter by active location filters.
-      const locFilters = {{
-        US: document.querySelector('.filter-chip[data-loc="US"]').dataset.active === "true",
-        CN: document.querySelector('.filter-chip[data-loc="CN"]').dataset.active === "true",
-        other: document.querySelector('.filter-chip[data-loc="other"]').dataset.active === "true",
-        unknown: document.querySelector('.filter-chip[data-loc="unknown"]').dataset.active === "true"
-      }};
-      const locMatch = (d) => {{
-        // KV cache filter: if "Priced" is off and this model has cache-priced
-        // providers, hide it. If "Not priced" is off and this model has NO cache-priced
-        // providers, hide it.
-        const kvPriced = document.querySelector('.filter-chip[data-kv="priced"]').dataset.active === "true";
-        const kvAll = document.querySelector('.filter-chip[data-kv="all"]').dataset.active === "true";
-        if (d.has_cache_priced_provider && !kvPriced) return false;
-        if (!d.has_cache_priced_provider && !kvAll) return false;
-        // Provider type filter.
-        const ptypeFilters = {{
-          "model-maker": document.querySelector('.filter-chip[data-ptype="model-maker"]').dataset.active === "true",
-          proxy: document.querySelector('.filter-chip[data-ptype="proxy"]').dataset.active === "true",
-          other: document.querySelector('.filter-chip[data-ptype="other"]').dataset.active === "true",
-        }};
-        const ptypeKey = {{ "Proxy": "proxy", "Model maker": "model-maker", "Other": "other" }}[d.provider_type] || "other";
-        if (!ptypeFilters[ptypeKey]) return false;
-        // Location filter.
-        const hqs = (d.provider_hqs || "").split(",").filter(Boolean);
-        if (hqs.length === 0) return locFilters.unknown;
-        return hqs.some((hq) => {{
-          if (hq === "US") return locFilters.US;
-          if (hq === "CN") return locFilters.CN;
-          if (hq === "unknown") return locFilters.unknown;
-          return locFilters.other;
-        }});
-      }};
-      // Filter to models that have a value for BOTH metrics AND pass loc filter.
-      const plotData = data.filter((d) => d[yMetric.field] != null && d[xMetric.field] != null && locMatch(d));
-
-      // Pareto frontier: points that are not dominated (no other point is both
-      // further left AND higher). Sort by X ascending, keep points where Y is
-      // strictly greater than the max Y seen so far.
-      const paretoFrontier = plotData
-        .slice()
-        .sort((a, b) => a[xMetric.field] - b[xMetric.field])
-        .filter((d, i, arr) => {{
-          if (i === 0) return true;
-          let maxY = -Infinity;
-          for (let j = 0; j < i; j++) {{
-            if (arr[j][yMetric.field] > maxY) maxY = arr[j][yMetric.field];
-          }}
-          return d[yMetric.field] > maxY;
-        }});
-
-      const plot = Plot.plot({{
-        marginTop: 24, marginRight: 60, marginBottom: 64, marginLeft: 50,
-        height: 560,
-        x: {{
-          type: "linear",
-          tickFormat: xMetric.fmt,
-          label: xMetric.label,
-          labelAnchor: "right", labelOffset: 40,
-          grid: true,
-        }},
-        y: {{
-          label: yMetric.label,
-          labelAnchor: "top", labelOffset: 16,
-          grid: true,
-        }},
-        marks: [
-          Plot.dot(plotData, {{
-            x: xMetric.field, y: yMetric.field,
-            fill: (d) => colorFor(d.provider_id || d.provider_name),
-            stroke: "#0c1018", strokeWidth: 1.2,
-            r: 8, opacity: 0.95,
-          }}),
-          // Pareto frontier line.
-          ...(paretoFrontier.length >= 2 ? [Plot.line(paretoFrontier, {{
-            x: xMetric.field, y: yMetric.field,
-            stroke: "#f0b429", strokeWidth: 2, strokeDasharray: "6,3",
-            opacity: 0.7,
-          }})] : []),
-          // Pareto frontier dots (highlighted).
-          ...(paretoFrontier.length >= 2 ? [Plot.dot(paretoFrontier, {{
-            x: xMetric.field, y: yMetric.field,
-            fill: "#f0b429", stroke: "#0c1018", strokeWidth: 1.5,
-            r: 5, opacity: 0.9,
-          }})] : []),
-          Plot.text(plotData, {{
-            x: xMetric.field, y: yMetric.field,
-            text: (d) => shortName(d.name),
-            fontSize: 9.5, dx: 12, dy: -8, textAnchor: "start",
-            fill: "#e6edf3", fillOpacity: 0.78, fontWeight: 500,
-            pointerEvents: "none",
-          }}),
-        ],
-      }});
-
-      const target = document.getElementById("scatter-plot");
-      target.innerHTML = "";
-      target.appendChild(plot);
-
-      // Re-bind tooltips (circles get replaced on each render).
-      // Observable Plot does NOT preserve input data order in the rendered
-      // <circle> DOM when a mark has categorical/quantitative channels — it
-      // batches dots by channel value (e.g. by r or fillOpacity), so circle i
-      // in DOM order does NOT correspond to plotData[i]. We match each circle
-      // to its datum by the rendered (cx, cy) against the scaled data points.
-      const sx = plot.scale("x"), sy = plot.scale("y");
-      const apply = (sc, v) => (sc && typeof sc.apply === "function" ? sc.apply(v) : null);
-      const dedup = new Map(); // "cx|cy" → datum (last one wins on tie)
-      for (const d of plotData) {{
-        const cx = apply(sx, d[xMetric.field]);
-        const cy = apply(sy, d[yMetric.field]);
-        if (cx == null || cy == null) continue;
-        dedup.set(Math.round(cx * 100) + "|" + Math.round(cy * 100), d);
-      }}
-      const circles = plot.querySelectorAll("circle");
-      circles.forEach((c) => {{
-        const cx = parseFloat(c.getAttribute("cx"));
-        const cy = parseFloat(c.getAttribute("cy"));
-        const d = (Number.isFinite(cx) && Number.isFinite(cy))
-          ? dedup.get(Math.round(cx * 100) + "|" + Math.round(cy * 100))
-          : null;
-        if (!d) return;
-        c.style.cursor = "pointer";
-        c.addEventListener("mouseenter", () => {{
-          tooltip.innerHTML = tipHtml(d, yMetricKey);
-          tooltip.style.display = "block";
-        }});
-        c.addEventListener("mousemove", (e) => {{
-          const padX = 16, padY = 16;
-          const rect = tooltip.getBoundingClientRect();
-          let x = e.clientX + padX;
-          let y = e.clientY + padY;
-          if (x + rect.width > window.innerWidth - 8) x = e.clientX - rect.width - padX;
-          if (y + rect.height > window.innerHeight - 8) y = e.clientY - rect.height - padY;
-          tooltip.style.left = x + "px";
-          tooltip.style.top = y + "px";
-        }});
-        c.addEventListener("mouseleave", () => {{ tooltip.style.display = "none"; }});
-      }});
-    }}
-
-    // Track current selections.
-    let currentX = "blended_cost";
-    let currentY = "agentic";
-
-    // Initial render.
-    render(currentX, currentY);
-
-    // Wire up Y-axis metric radio buttons.
-    document.querySelectorAll('input[name="metric"]').forEach((input) => {{
-      input.addEventListener("change", (e) => {{
-        currentY = e.target.value;
-        document.querySelectorAll('.metric-radio:not(.x-metric)').forEach((label) => {{
-          label.dataset.active = label.dataset.metric === currentY ? "true" : "false";
-        }});
-        render(currentX, currentY);
-      }});
-    }});
-
-    // Wire up X-axis metric radio buttons.
-    document.querySelectorAll('input[name="xmetric"]').forEach((input) => {{
-      input.addEventListener("change", (e) => {{
-        currentX = e.target.value;
-        document.querySelectorAll('.metric-radio.x-metric').forEach((label) => {{
-          label.dataset.active = label.dataset.xmetric === currentX ? "true" : "false";
-        }});
-        render(currentX, currentY);
-      }});
-    }});
-
-    // Wire up scatter location filter chips.
-    document.querySelectorAll('.scatter-controls .filter-chip').forEach((chip) => {{
-      chip.addEventListener("click", (e) => {{
-        e.preventDefault();
-        const loc = chip.dataset.loc;
-        const isActive = chip.dataset.active === "true";
-        chip.dataset.active = isActive ? "false" : "true";
-        chip.querySelector("input").checked = !isActive;
-        render(currentX, currentY);
-      }});
-    }});
-  }})();
-</script>
-<script>
-  (function () {{
-    const nwData = JSON.parse(document.getElementById("nw-scatter-data").textContent);
-    const colorMap = JSON.parse(document.getElementById("color-map").textContent);
-    const regression = JSON.parse(document.getElementById("nw-regression").textContent);
-    if (!nwData.length || typeof Plot === "undefined") return;
-
-    const colorFor = (name) => colorMap[name] || "#5b8def";
-    const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
-      {{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[c]
-    ));
-    const fmtMoney = (n) => (n == null ? "n/a" : "$" + Number(n).toFixed(2));
-    const fmtNum = (n, d = 2) => (n == null ? "n/a" : Number(n).toFixed(d));
-
-    const shortName = (name) => {{
-      if (!name) return "";
-      const trimmed = name.replace(/\\s*\\([^)]*\\)\\s*/g, "").trim();
-      const max = 24;
-      return trimmed.length <= max ? trimmed : trimmed.slice(0, max - 1) + "…";
-    }};
-
-    const tipHtml = (d) => {{
-      const rows = [
-        ["Blended cost / 1M", fmtMoney(d.blended_cost)],
-        ["  · input", fmtMoney(d.input_price)],
-        ["  · output", fmtMoney(d.output_price)],
-        ["  · cached input", fmtMoney(d.cached_input_price)],
-        ["Energy @ 16k–64k", fmtNum(d.energy_mwh, 2) + " mWh"],
-        ["  · cache-hit rate", d.cache_hit_rate != null ? fmtNum(d.cache_hit_rate, 0) + "%" : "n/a"],
-        ["  · share of reqs", d.request_pct != null ? fmtNum(d.request_pct, 1) + "%" : "n/a"],
-      ];
-      const variantTag = d.is_variant ? " <span style=\\"color:#8b97a8;font-weight:400\\">(variant)</span>" : "";
-      return "<div style=\\"font-weight:600;margin-bottom:4px\\">" + escapeHtml(d.name) + variantTag + "</div>" +
-        "<div style=\\"color:#8b97a8;margin-bottom:6px\\">" + escapeHtml(d.provider || "?") + "</div>" +
-        "<div style=\\"color:#5b8def;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px\\">Neuralwatt</div>" +
-        rows.map(([k, v]) =>
-          "<div style=\\"display:flex;justify-content:space-between;gap:1em\\">" +
-          "<span style=\\"color:#8b97a8\\">" + escapeHtml(k) + "</span>" +
-          "<span style=\\"font-variant-numeric:tabular-nums\\">" + escapeHtml(String(v)) + "</span></div>"
-        ).join("");
-    }};
-
-    const tooltip = document.createElement("div");
-    tooltip.className = "tooltip-popup";
-    document.body.appendChild(tooltip);
-
-    // Build regression line data points for the dashed line mark.
-    const regressionLine = [];
-    if (regression.slope != null) {{
-      const xMin = 0, xMax = 1.1;
-      regressionLine.push({{x: xMin, y: Math.max(0, regression.slope * xMin + regression.intercept)}});
-      regressionLine.push({{x: xMax, y: Math.max(0, regression.slope * xMax + regression.intercept)}});
-    }}
-
-    const plot = Plot.plot({{
-      marginTop: 24, marginRight: 40, marginBottom: 64, marginLeft: 80,
-      height: 480,
-      x: {{
-        type: "linear",
-        tickFormat: (d) => "$" + d.toFixed(2),
-        label: "NW blended cost per 1M tokens (USD)  —  7 cache · 2 input · 1 output",
-        labelAnchor: "right", labelOffset: 40,
-        grid: true,
-      }},
-      y: {{
-        type: "linear",
-        tickFormat: (d) => d + " mWh",
-        label: "Energy per request (mWh)  —  16k–64k band",
-        labelAnchor: "top", labelOffset: 16,
-        grid: true,
-      }},
-      marks: [
-        // All model dots: base models are solid/large, variants are hollow/smaller.
-        Plot.dot(nwData, {{
-          x: "blended_cost", y: "energy_mwh",
-          fill: (d) => colorFor(d.provider || d.name),
-          fillOpacity: (d) => d.is_variant ? 0.3 : 0.95,
-          stroke: (d) => colorFor(d.provider || d.name),
-          strokeWidth: (d) => d.is_variant ? 1.5 : 1.2,
-          r: (d) => d.is_variant ? 6 : 8,
-        }}),
-        // Regression line.
-        ...(regressionLine.length ? [Plot.line(regressionLine, {{
-          x: "x", y: "y",
-          stroke: "#5b8def", strokeWidth: 1.5, strokeDasharray: "5,4",
-          opacity: 0.6,
-        }})] : []),
-        // Labels.
-        Plot.text(nwData, {{
-          x: "blended_cost", y: "energy_mwh",
-          text: (d) => shortName(d.name),
-          fontSize: 9.5, dx: 12, dy: -8, textAnchor: "start",
-          fill: "#e6edf3", fillOpacity: 0.78, fontWeight: 500,
-          pointerEvents: "none",
-        }}),
-      ],
-    }});
-
-    const target = document.getElementById("nw-scatter-plot");
-    target.innerHTML = "";
-    target.appendChild(plot);
-
-    // Append an annotation with the regression equation.
-    if (regression.slope != null) {{
-      const annotation = document.createElement("div");
-      annotation.style.cssText = "font-size:0.8rem;color:var(--muted);margin-top:0.6rem;font-family:ui-monospace,monospace";
-      annotation.innerHTML = "y = " + regression.slope + " × cost + (" + regression.intercept + ")  ·  "
-        + "r = " + regression.r + "  ·  r² = " + regression.r_squared + "  ·  n = " + regression.n
-        + " (base models only)";
-      target.appendChild(annotation);
-    }}
-
-    // Re-bind tooltips. Observable Plot batches dots by channel value when a
-    // mark has categorical/quantitative styling channels (here: r, fillOpacity
-    // differ between base models and variants), so circle i in DOM order does
-    // NOT correspond to nwData[i]. Match each circle to its datum by the
-    // rendered (cx, cy) against the scaled data points instead.
-    const sxNw = plot.scale("x"), syNw = plot.scale("y");
-    const applyNw = (sc, v) => (sc && typeof sc.apply === "function" ? sc.apply(v) : null);
-    const dedupNw = new Map();
-    for (const d of nwData) {{
-      const cx = applyNw(sxNw, d.blended_cost);
-      const cy = applyNw(syNw, d.energy_mwh);
-      if (cx == null || cy == null) continue;
-      dedupNw.set(Math.round(cx * 100) + "|" + Math.round(cy * 100), d);
-    }}
-    const circles = plot.querySelectorAll("circle");
-    circles.forEach((c) => {{
-      const cx = parseFloat(c.getAttribute("cx"));
-      const cy = parseFloat(c.getAttribute("cy"));
-      const d = (Number.isFinite(cx) && Number.isFinite(cy))
-        ? dedupNw.get(Math.round(cx * 100) + "|" + Math.round(cy * 100))
-        : null;
-      if (!d) return;
-      c.style.cursor = "pointer";
-      c.addEventListener("mouseenter", () => {{
-        tooltip.innerHTML = tipHtml(d);
-        tooltip.style.display = "block";
-      }});
-      c.addEventListener("mousemove", (e) => {{
-        const padX = 16, padY = 16;
-        const rect = tooltip.getBoundingClientRect();
-        let x = e.clientX + padX;
-        let y = e.clientY + padY;
-        if (x + rect.width > window.innerWidth - 8) x = e.clientX - rect.width - padX;
-        if (y + rect.height > window.innerHeight - 8) y = e.clientY - rect.height - padY;
-        tooltip.style.left = x + "px";
-        tooltip.style.top = y + "px";
-      }});
-      c.addEventListener("mouseleave", () => {{ tooltip.style.display = "none"; }});
-    }});
-  }})();
-</script>
-<script>
-  (function () {{
-    function applyProviderFilters() {{
-      var filters = {{}};
-      document.querySelectorAll('#provider-filters .filter-chip[data-ploc]').forEach(function (c) {{
-        filters[c.dataset.ploc] = c.dataset.active === 'true';
-      }});
-      var ptypeFilters = {{}};
-      document.querySelectorAll('#provider-filters .filter-chip[data-ptype]').forEach(function (c) {{
-        ptypeFilters[c.dataset.ptype] = c.dataset.active === 'true';
-      }});
-      var cachePriced = document.querySelector('#provider-filters .filter-chip[data-cache=priced]').dataset.active === 'true';
-      var cacheAll = document.querySelector('#provider-filters .filter-chip[data-cache=all]').dataset.active === 'true';
-      document.querySelectorAll('#providers-grid .provider-card').forEach(function (card) {{
-        var hq = card.dataset.hq || 'unknown';
-        var match;
-        if (hq === 'us') match = filters.us;
-        else if (hq === 'cn') match = filters.cn;
-        else if (hq === 'unknown') match = filters.unknown;
-        else match = filters.other;
-        if (match) {{
-          var cache = card.dataset.cache;
-          if (cache === 'priced' && !cachePriced) match = false;
-          if (cache === 'all' && !cacheAll) match = false;
-        }}
-        if (match) {{
-          var ptype = card.dataset.ptype || 'other';
-          if (!ptypeFilters[ptype]) match = false;
-        }}
-        card.style.display = match ? '' : 'none';
-      }});
-    }}
-    document.querySelectorAll('#provider-filters .filter-chip').forEach(function (chip) {{
-      function toggle() {{
-        var isActive = chip.dataset.active === 'true';
-        chip.dataset.active = isActive ? 'false' : 'true';
-        applyProviderFilters();
-      }}
-      chip.addEventListener('click', toggle);
-      chip.addEventListener('keydown', function (e) {{
-        if (e.key === 'Enter' || e.key === ' ') {{ e.preventDefault(); toggle(); }}
-      }});
-    }});
-  }})();
-</script>
-</body>
-</html>
-"""
-    HTML_PATH.write_text(html, encoding="utf-8")
-    print(f"\nWrote HTML report: {HTML_PATH}")
-    print(f"Open with: file://{HTML_PATH}")
+    print(f"\nWrote site data to {SITE_DATA_DIR}:")
+    print(f"  scatter.json:    {len(scatter_data)} models")
+    print(f"  nw-scatter.json: {len(nw_scatter_data)} models")
+    print(f"  regression.json: n={regression['n']}")
+    print(f"  colors.json:     {len(color_map)} providers")
+    print(f"  legend.json:     {len(legend)} providers")
+    print(f"  models.json:     {len(model_entries)} models")
+    print(f"  providers.json:  {len(provider_entries)} providers")
+    print(f"  meta.json:       generated_at={generated_at}")
 
 
 def print_match_summary(con: duckdb.DuckDBPyConnection) -> None:
@@ -2642,7 +1694,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "--no-fetch", action="store_true", help="Skip AA API; use cache or sample.json"
+        "--no-fetch",
+        action="store_true",
+        help="Skip AA API; use cached data if present (even if stale), else sample.json",
     )
     parser.add_argument(
         "--force-refresh",
@@ -2654,12 +1708,16 @@ def main() -> int:
         action="store_true",
         help="Skip models.dev fetch and enrichment",
     )
-    parser.add_argument("--no-html", action="store_true", help="Skip HTML report")
     args = parser.parse_args()
 
     # 1. Artificial Analysis source
     if args.no_fetch:
-        aa_payload, raw_path = load_sample()
+        cache_path = CACHE_DIR / "language_models_free_latest.json"
+        if cache_path.exists():
+            print(f"--no-fetch: using cached AA data (any age): {cache_path}")
+            aa_payload, raw_path = json.loads(cache_path.read_text()), cache_path
+        else:
+            aa_payload, raw_path = load_sample()
     else:
         api_key = load_api_key()
         aa_payload, raw_path = fetch_aa_models(api_key, force=args.force_refresh)
@@ -2717,10 +1775,9 @@ def main() -> int:
         except Exception as exc:
             print(f"WARN: Model overrides load failed: {exc}", file=sys.stderr)
 
-    # 4. Top 10 demo (console + HTML)
+    # 4. Top 10 demo (console) + site data export
     print_top10_agentic(con)
-    if not args.no_html:
-        render_top10_open_html(con)
+    export_site_data(con)
 
     # 5. Export all tables to Parquet
     parquet_dir = DATA_DIR / "parquet"

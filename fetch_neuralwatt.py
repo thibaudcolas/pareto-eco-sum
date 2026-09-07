@@ -120,7 +120,7 @@ def parse_energy_value(text: str) -> tuple[float | None, str | None]:
     """Return (mWh, unit_text). Normalizes Wh -> mWh by *1000. None if no number."""
     if not text:
         return None, None
-    text = text.strip()
+    text = text.strip().replace(",", "")
     m = re.search(r"(-?[\d.]+)\s*(mWh|Wh)", text, re.IGNORECASE)
     if not m:
         return None, None
@@ -372,6 +372,14 @@ def load_energy(con: duckdb.DuckDBPyConnection, bands: list[dict[str, str]], row
             total_cells += 1
             if cell["has_data"]:
                 populated_cells += 1
+    if populated_cells == 0:
+        sys.exit(
+            f"Neuralwatt energy table parsed {len(rows)} model rows / {total_cells} cells "
+            "but ZERO populated cells — the portal markup likely changed. "
+            "Inspect data/cache/neuralwatt_energy_pricing_latest.html and update parse_energy_table()."
+        )
+    for row in rows:
+        for cell in row["cells"]:
             flat.append((
                 row["model_display_name"],
                 cell["band_label"],

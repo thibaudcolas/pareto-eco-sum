@@ -80,7 +80,7 @@ For energy per Intelligence Index task, the same regression is applied to the `c
 
 ## Neuralwatt energy bands
 
-Neuralwatt reports energy per request at 7 prompt-size bands. The HTML report uses the **16k–64k** band as the representative value because:
+Neuralwatt reports energy per request at 7 prompt-size bands. The site data export (and the site's charts) use the **16k–64k** band as the representative value because:
 
 1. It has data for all 12 Neuralwatt models (the 256k–1M band is missing for 10/12 models).
 2. It represents a mid-range request size typical of production workloads.

@@ -1,0 +1,159 @@
+  :root {
+    --bg: #0c1018; --surface: #141b27; --surface-2: #1b2434;
+    --text: #e6edf3; --muted: #8b97a8; --accent: #5b8def;
+    --agentic: #2dd4bf; --coding: #60a5fa; --intel: #c084fc;
+    --border: #243044;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system,
+      "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; line-height: 1.4; padding: 2rem 1rem;
+  }
+  .container { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 2rem; }
+  h1 { margin: 0 0 0.4rem; font-size: 1.7rem; }
+  h2.section { font-size: 1.15rem; margin: 2.5rem 0 0.8rem; letter-spacing: 0.02em;
+    scroll-margin-top: 1rem; }
+  .anchor { color: var(--muted); text-decoration: none; margin-right: 0.4rem; font-weight: 400; }
+  .anchor:hover { color: var(--accent); }
+  header p { color: var(--muted); margin: 0.3rem 0; font-size: 0.95rem; }
+  header a { color: var(--accent); }
+  .scatter-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.2rem 1.4rem;
+    margin-top: 0.5rem;
+  }
+  #scatter-plot { width: 100%; overflow: visible; }
+  #scatter-plot svg { width: 100%; height: auto; font-family: inherit; }
+  .plot-note { color: var(--muted); font-size: 0.8rem; margin-top: 0.6rem; }
+  /* Custom provider legend for the scatter plot. */
+  .provider-legend {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin: 0.8rem 0 1.2rem; font-size: 0.85rem;
+  }
+  .legend-item { display: inline-flex; align-items: center; gap: 0.35rem; cursor: default;
+    padding: 0.15rem 0.5rem 0.15rem 0.35rem; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-2); }
+  .legend-item:hover { border-color: var(--accent); }
+  .legend-item .swatch { width: 0.7em; height: 0.7em; border-radius: 999px; flex: none; }
+  .legend-logo {
+    width: 20px; height: 20px; border-radius: 4px; overflow: hidden;
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+  }
+  .legend-logo img { width: 16px; height: 16px; object-fit: contain; }
+  .logo-letter { font-weight: 700; font-size: 0.8rem; color: var(--text); }
+  .legend-name { color: var(--text); }
+  /* Top 10 cards. */
+  .top10 { display: grid; gap: 0.8rem; }
+  .card {
+    display: grid; grid-template-columns: auto 64px 1fr auto; gap: 1rem; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.2rem; transition: transform 0.1s ease;
+  }
+  .card:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .rank { font-weight: 700; color: var(--muted); font-size: 1.1rem; min-width: 2rem; }
+  .logo-wrap { display: flex; align-items: center; justify-content: center; width: 64px; height: 64px;
+    background: var(--surface-2); border-radius: 10px; overflow: hidden; }
+  .logo { width: 40px; height: 40px; object-fit: contain; }
+  .logo-fallback { width: 100%; text-align: center; font-weight: 700; font-size: 1.5rem; color: var(--accent); }
+  .info { min-width: 0; }
+  .info h2 { margin: 0; font-size: 1.05rem; }
+  .creator { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; }
+  .creator .weights { margin-left: 0.4rem; }
+  .meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; display: flex; gap: 0.8rem; flex-wrap: wrap; }
+  .meta code { background: var(--surface-2); padding: 0 0.3em; border-radius: 3px; font-size: 0.85em; }
+  .nw-chip { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent);
+    padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); display: inline-block; }
+  .cap-chip { padding: 0.05rem 0.35rem; border-radius: 4px; font-size: 0.68rem; font-weight: 700;
+    display: inline-block; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }
+  .cap-reasoning { color: var(--intel); border-color: color-mix(in srgb, var(--intel) 40%, transparent); }
+  .cap-tools { color: var(--coding); border-color: color-mix(in srgb, var(--coding) 40%, transparent); }
+  .cap-mod { text-transform: capitalize; }
+  .cap-ctx { font-weight: 600; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .card-providers { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; align-items: center; }
+  .providers-label { font-size: 0.7rem; color: var(--muted); margin-right: 0.2rem; }
+  .provider-link { font-size: 0.72rem; color: var(--accent); text-decoration: none; padding: 0.05rem 0.35rem;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); display: inline-block; }
+  .provider-link:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  /* Providers section */
+  .providers-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.6rem; }
+  .provider-card { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.8rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    text-decoration: none; color: var(--text); transition: border-color 0.1s, transform 0.1s; }
+  .provider-card:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .provider-card-logo { width: 28px; height: 28px; border-radius: 6px; overflow: hidden;
+    display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .provider-card-logo img { width: 20px; height: 20px; object-fit: contain; }
+  .provider-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+  .provider-card-name { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .provider-card-count { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
+  .loc-badge { font-size: 0.65rem; font-weight: 600; padding: 0.05rem 0.3rem; border-radius: 3px;
+    background: var(--surface-2); color: var(--muted); display: inline-flex; align-items: center; gap: 0.15rem; }
+  .loc-dc { opacity: 0.7; }
+  .score-wrap { display: flex; align-items: center; gap: 0.8rem; }
+  .score.agentic { text-align: center; min-width: 80px; }
+  .score-value { font-size: 1.6rem; font-weight: 700; color: var(--agentic); }
+  .score-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .secondary-scores { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.75rem; }
+  .secondary-scores div { display: flex; justify-content: space-between; gap: 0.5rem; color: var(--muted); }
+  .secondary-scores b { color: var(--text); }
+  .stats {
+    display: none; grid-template-columns: repeat(2, minmax(80px, auto)); gap: 0.4rem 1rem;
+    border-left: 1px solid var(--border); padding-left: 1rem;
+  }
+  .stats div { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--muted); }
+  .stats b { color: var(--text); font-size: 0.9rem; }
+  @media (min-width: 820px) { .stats { display: grid; } }
+  footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem; text-align: center; }
+  footer a { color: var(--accent); }
+  /* Floating custom tooltip bound to scatter dots. */
+  .tooltip-popup {
+    position: fixed; z-index: 100; display: none;
+    background: var(--surface-2); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 0.65rem 0.85rem; font-size: 0.8rem;
+    min-width: 240px; max-width: 340px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+    pointer-events: none; color: var(--text); line-height: 1.35;
+  }
+  /* Segmented control for selecting the Y-axis metric. */
+  .scatter-controls {
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+  }
+  .scatter-controls .controls-label {
+    color: var(--muted); font-size: 0.8rem; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-right: 0.2rem;
+  }
+  .metric-radio { display: inline-flex; align-items: center; cursor: pointer;
+    padding: 0.25rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface-2); font-size: 0.85rem; user-select: none;
+    transition: border-color 0.1s, background 0.1s; }
+  .metric-radio:hover { border-color: var(--accent); }
+  .metric-radio:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .metric-radio input { position: absolute; opacity: 0; pointer-events: none; }
+  .metric-radio .swatch {
+    display: inline-block; width: 0.6em; height: 0.6em; border-radius: 999px;
+    margin-right: 0.35em; background: currentColor;
+  }
+  .metric-radio[data-active="true"] { border-color: currentColor; background: color-mix(in srgb, currentColor 18%, transparent); }
+  .metric-radio[data-metric="agentic"] { color: var(--agentic); }
+  .metric-radio[data-metric="coding"] { color: var(--coding); }
+  .metric-radio[data-metric="intel"] { color: var(--intel); }
+  .metric-radio.x-metric { color: var(--accent); }
+  .filter-chip { display: inline-flex; align-items: center; cursor: pointer;
+    padding: 0.25rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface-2); font-size: 0.85rem; user-select: none;
+    transition: border-color 0.1s, background 0.1s; }
+  .filter-chip:hover { border-color: var(--accent); }
+  .filter-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .filter-chip input { position: absolute; opacity: 0; pointer-events: none; }
+  .filter-chip[data-active="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .filter-chip[data-active="false"] { opacity: 0.4; }
+  .provider-filters { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    margin-bottom: 0.6rem; }
+  /* Observable Plot theme tweaks to match the dark UI. */
+  #scatter-plot svg .plot text { fill: var(--text); }
+  #scatter-plot svg .plot .axis text { fill: var(--muted); }
+  #scatter-plot svg .plot .axis line, #scatter-plot svg .plot .grid line { stroke: var(--border); }
+  #scatter-plot svg .plot .axis title { fill: var(--muted); }
+  #scatter-plot svg .plot .tip { fill: var(--surface-2); stroke: var(--border); }
+  #scatter-plot svg .plot .tip text { fill: var(--text); font-size: 0.8rem; }

@@ -11,20 +11,21 @@ This project fetches, cross-references, and visualizes data about open-weight la
 3. **[Neuralwatt](https://portal.neuralwatt.com)** — per-request energy consumption (mWh) measured from real traffic, plus Neuralwatt's own pricing, for 12 models across 7 prompt-size bands.
 4. **[OpenRouter](https://openrouter.ai)** — provider metadata (86 providers): headquarters location (ISO 3166-1 alpha-2), datacenter locations, and documentation URLs.
 
-All data is stored in a single DuckDB file (`data/pareto.duckdb`) and rendered into an interactive HTML report (`data/index.html`) with:
+All data is stored in a single DuckDB file (`data/pareto.duckdb`). The report is an
+[Astro](https://astro.build) site at the repo root, statically rendered from committed JSON
+snapshots in `src/data/` (exported by `fetch_models.py`) with:
 
 - **Scatter plot** of open-weight models that pass the filters (X: blended cost or energy, Y: Agentic/Coding/Intelligence index) with Observable Plot, provider-colored dots, hover tooltips, and US/China/Other location filters.
 - **Neuralwatt scatter plot** of the available Neuralwatt models (X: NW blended cost, Y: energy per request at 16k–64k band) with a linear regression line and correlation statistics.
 - **Model cards** for the same open-weight models with provider logos, capability chips (reasoning, tool calling, modalities, context window), Neuralwatt energy badges, and links to every provider offering the model.
-- **Providers section** listing providers that offer those open-weight models, with Google favicon logos, headquarters/datacenter flags, and model counts.
+- **Providers section** listing providers that offer those open-weight models, with favicon logos, headquarters/datacenter flags, and model counts.
 
 ## Tech stack
 
-- **[uv](https://docs.astral.sh/uv/)** with PEP 723 inline script metadata — no virtualenv setup required; `uv run --script` resolves dependencies automatically.
 - **[DuckDB](https://duckdb.org/)** — single-file analytical database, ideal for joining multiple data sources locally.
 - **[httpx](https://www.python-httpx.org/)** — HTTP client for API fetching.
 - **[BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/)** — HTML parsing for the Neuralwatt energy-pricing table (server-rendered, no JSON API).
-- **[Observable Plot](https://observablehq.com/plot/)** (via CDN) — declarative SVG charting in the browser.
+- **[Astro 5](https://astro.build)** with **[@observablehq/plot](https://observablehq.com/plot/)** (npm deps, bundled at build time) — static site generation for the report front-end at the repo root.
 - **[Google Favicons](https://www.google.com/s2/favicons)** — provider favicon lookup by domain.
 - **Python 3.11+** — runs as standalone scripts with inline metadata, no package management needed.
 
@@ -37,25 +38,32 @@ echo "AA_API_KEY=aa_your_key_here" > .env
 # 2. Fetch Neuralwatt data (API + energy table scrape)
 ./fetch_neuralwatt.py
 
-# 3. Fetch Artificial Analysis + models.dev + OpenRouter data, render HTML report
+# 3. Fetch Artificial Analysis + models.dev + OpenRouter data, export JSON snapshots
 ./fetch_models.py
 
-# 4. Open the report
-open data/index.html
+# 4. Build and preview the site
+npm install && npm run build
+npm run preview
 ```
+
+On Netlify the build runs automatically via `netlify.toml`.
 
 ## Scripts
 
 ### `fetch_models.py` (PEP 723, `uv run --script`)
 
-Fetches Artificial Analysis models, models.dev catalog, OpenRouter providers, loads them into DuckDB, computes cross-source matches, and renders the HTML report.
+Fetches Artificial Analysis models, models.dev catalog, OpenRouter providers, loads them into DuckDB, computes cross-source matches, and exports JSON data snapshots to `src/data/` (the contract consumed by the Astro site).
 
 ```sh
-./fetch_models.py                  # full pipeline: fetch all, refresh cache if stale, render HTML
+./fetch_models.py                  # full pipeline: fetch all, refresh cache if stale, export site JSON
 ./fetch_models.py --no-fetch       # use cache or sample.json; no AA API calls
 ./fetch_models.py --force-refresh  # ignore cache TTL; re-fetch everything
-./fetch_models.py --no-modelsdev   # skip models.dev + OpenRouter + HTML
-./fetch_models.py --no-html        # skip HTML report
+./fetch_models.py --no-modelsdev   # skip models.dev + OpenRouter enrichment
+```
+
+```sh
+npm run dev             # Astro dev server
+npm run build           # production build to dist/
 ```
 
 ### `fetch_neuralwatt.py` (PEP 723, `uv run --script`)
@@ -87,6 +95,10 @@ Fetches the Neuralwatt API (`/v1/models`) and scrapes the energy-pricing table f
 | `fetch_runs_neuralwatt`     | internal            |     2 | Neuralwatt fetch audit log                                            |
 
 All tables are exported to Parquet in `data/parquet/`.
+
+`src/data/*.json` **are committed** — they are the data snapshots the Astro site
+builds from, so the front-end renders without any Python or database dependency. The
+`data/` directory (DuckDB, cache, Parquet) stays gitignored.
 
 ## Data sources
 
@@ -126,6 +138,19 @@ AA slugs use dashes between version digits (`gemini-3-5-flash`), models.dev IDs 
 3. AA-slug-prefix fallback: AA omits a `-reasoning` / `-non-reasoning` suffix.
 
 For Neuralwatt, matching is by display name: exact match first, then "AA name starts with NW display_name". Base variants preferred over `-fast`/`-short` suffixed ones.
+
+## Site structure
+
+- `src/layouts/BaseLayout.astro` — head, header, footer
+- `src/pages/index.astro` — the whole page: legend, scatter controls, plot
+  mounts, statically rendered model + provider sections
+- `src/scripts/scatter.js` — main comparison scatter (X/Y metric radios,
+  location / KV-cache / provider-type filters, Pareto frontier, tooltips)
+- `src/scripts/nw-scatter.js` — Neuralwatt energy-vs-cost scatter with
+  regression line and variant styling
+- `src/scripts/provider-filters.js` — provider card filter chips
+- `src/styles/global.css` — page styles (ported verbatim from the generator)
+- `src/data/*.json` — data snapshots (see schemas in the repo docs)
 
 ## Documentation
 

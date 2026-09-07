@@ -1,0 +1,265 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import scatter from "../data/scatter.json";
+import nwScatter from "../data/nw-scatter.json";
+import legend from "../data/legend.json";
+import models from "../data/models.json";
+import providers from "../data/providers.json";
+
+const MODELSDEV_LOGOS_BASE = "https://models.dev/logos";
+const GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain=";
+
+// Model cards: modality chips (first 3 letters of each input modality, CSS capitalizes).
+const inputMods = (m: string) => m.split(",").map((x) => x.trim()).filter(Boolean);
+
+---
+
+<BaseLayout title="Open-weight LLM landscape — benchmarks, pricing & energy">
+  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Model comparison — {scatter.length} open-weight models</h2>
+  <div class="scatter-wrap">
+    <div class="provider-legend">
+      {legend.map((prov) => (
+        <span class="legend-item" data-provider={prov.id || prov.name}>
+          <span class="swatch" style={`background:${prov.color}`} />
+          <span class="legend-logo" style={`background:${prov.color}20`}>
+            {prov.logo_url ? (
+              <>
+                <img src={prov.logo_url} alt={prov.name} title={prov.name} loading="lazy"
+                  onerror={`this.style.display='none';this.nextElementSibling.style.display='inline-block'`} />
+                <span class="logo-letter" style="display:none">{prov.letter}</span>
+              </>
+            ) : (
+              <span class="logo-letter">{prov.letter}</span>
+            )}
+          </span>
+          <span class="legend-name">{prov.name}</span>
+        </span>
+      ))}
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">X axis</span>
+      <label class="metric-radio x-metric" data-xmetric="blended_cost" data-active="true">
+        <input type="radio" name="xmetric" value="blended_cost" checked />
+        <span>Cost / 1M tok</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="cost_per_task">
+        <input type="radio" name="xmetric" value="cost_per_task" />
+        <span>Cost / task</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="energy_per_req">
+        <input type="radio" name="xmetric" value="energy_per_req" />
+        <span>Energy / req</span>
+      </label>
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">Y axis</span>
+      <label class="metric-radio" data-metric="agentic" data-active="true">
+        <input type="radio" name="metric" value="agentic" checked />
+        <span class="swatch" /><span>Agentic Index</span>
+      </label>
+      <label class="metric-radio" data-metric="coding">
+        <input type="radio" name="metric" value="coding" />
+        <span class="swatch" /><span>Coding Index</span>
+      </label>
+      <label class="metric-radio" data-metric="intel">
+        <input type="radio" name="metric" value="intel" />
+        <span class="swatch" /><span>Intelligence Index</span>
+      </label>
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">Inference provider availability</span>
+      <label class="filter-chip" data-loc="US" data-active="true">
+        <input type="checkbox" checked /> 🇺🇸 US
+      </label>
+      <label class="filter-chip" data-loc="CN" data-active="true">
+        <input type="checkbox" checked /> 🇨🇳 China
+      </label>
+      <label class="filter-chip" data-loc="other" data-active="true">
+        <input type="checkbox" checked /> 🌍 Other
+      </label>
+      <label class="filter-chip" data-loc="unknown" data-active="true">
+        <input type="checkbox" checked /> ❓ Unknown
+      </label>
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">KV cache</span>
+      <label class="filter-chip" data-kv="priced" data-active="true">
+        <input type="checkbox" checked /> 💰 Priced
+      </label>
+      <label class="filter-chip" data-kv="all" data-active="true">
+        <input type="checkbox" checked /> ❌ Not priced
+      </label>
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">Provider type</span>
+      <label class="filter-chip" data-ptype="model-maker" data-active="true">
+        <input type="checkbox" checked /> Model maker
+      </label>
+      <label class="filter-chip" data-ptype="proxy" data-active="true">
+        <input type="checkbox" checked /> Proxy
+      </label>
+      <label class="filter-chip" data-ptype="other" data-active="true">
+        <input type="checkbox" checked /> Other
+      </label>
+    </div>
+    <div id="scatter-plot"></div>
+    <p class="plot-note">Blended cost = <code>(7·cache + 2·input + 1·output)/10</code>. When a provider omits cache-hit pricing, the input price is used as an upper bound (cache hits are never more expensive than a regular input token). <strong>{scatter.length} models shown</strong>: open-weight (via models.dev), with an Agentic Index score AND input + output pricing. Models without input or output pricing are excluded. Neuralwatt energy values in tooltips are measured when an AA model matches a NW model; otherwise the tooltip shows an <strong>estimated</strong> energy derived from the NW cost ↔ energy regression (see the Neuralwatt scatter below).</p>
+  </div>
+
+  <h2 class="section" id="neuralwatt"><a href="#neuralwatt" class="anchor">§</a> Neuralwatt — Energy use vs. cost ({nwScatter.length} models, 16k–64k band)</h2>
+  <div class="scatter-wrap">
+    <div id="nw-scatter-plot"></div>
+    <p class="plot-note">X: NW blended cost per 1M tokens = <code>(7·cache + 2·input + 1·output)/10</code> (USD, from Neuralwatt pricing).
+      Y: energy per request at the 16k–64k prompt-size band (mWh, scraped from the
+      <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt portal</a>).
+      Dashed line: linear regression on base models only (excluding -fast / -short variants).
+      Hover any dot for details.</p>
+  </div>
+
+  <h2 class="section" id="models"><a href="#models" class="anchor">§</a> Open-weight models — {models.length} models by Agentic Index</h2>
+  <section class="top10">
+    {models.map((m, i) => (
+      <article class="card" style={`--rank:${i + 1}`}>
+        <div class="rank">#{i + 1}</div>
+        <div class="logo-wrap" style={`border: 2px solid ${m.color}; box-shadow: 0 0 0 1px ${m.color}33;`}>
+          {m.provider_id ? (
+            <>
+              <img class="logo" src={`${MODELSDEV_LOGOS_BASE}/${m.provider_id}.svg`}
+                alt={`${m.provider_name} logo`}
+                onerror={`this.style.display='none';this.nextElementSibling.style.display='inline'`} />
+              <span class="logo-fallback" style="display:none">{m.provider_name.charAt(0)}</span>
+            </>
+          ) : (
+            <span class="logo-fallback">{(m.provider_name || "?").charAt(0)}</span>
+          )}
+        </div>
+        <div class="info">
+          <h2>{m.name}</h2>
+          <div class="creator">
+            {m.provider_name}
+            {m.weights_url && <> · <a class="weights" href={m.weights_url} target="_blank" rel="noopener">weights</a></>}
+          </div>
+          <div class="meta">
+            <span>released {m.release_label}</span>
+            <span>slug: <code>{m.slug}</code></span>
+            {m.context_window != null && (
+              <span class="cap-chip cap-ctx" title="Context window">{Math.round(m.context_window / 1000)}k</span>
+            )}
+            {m.reasoning && <span class="cap-chip cap-reasoning" title="Reasoning">R</span>}
+            {m.tool_call && <span class="cap-chip cap-tools" title="Tool calling">T</span>}
+            {inputMods(m.input_modalities).map((mod) => (
+              <span class="cap-chip cap-mod" title={`Input: ${mod}`}>{mod.slice(0, 3)}</span>
+            ))}
+            {m.nw_model_id && (
+              <span class="nw-chip" title="Neuralwatt · energy per request at the 16k–64k band">
+                ⚡ {m.nw_energy_mwh != null ? m.nw_energy_mwh.toFixed(2) + " mWh" : "—"}
+              </span>
+            )}
+          </div>
+          {m.providers.length > 0 && (
+            <div class="card-providers">
+              <span class="providers-label">{m.providers.length} providers:</span>
+              {m.providers.map((p) => (
+                p.doc_url ? (
+                  <a class="provider-link" href={p.doc_url} target="_blank" rel="noopener" title={`${p.name} docs`}>{p.name}</a>
+                ) : (
+                  <span class="provider-link">{p.name}</span>
+                )
+              ))}
+            </div>
+          )}
+        </div>
+        <div class="score-wrap">
+          <div class="score agentic" title="Artificial Analysis Agentic Index">
+            <div class="score-value">{m.agentic.toFixed(2)}</div>
+            <div class="score-label">agentic</div>
+          </div>
+          <div class="secondary-scores">
+            <div><span>coding</span><b>{m.coding.toFixed(1)}</b></div>
+            <div><span>intel.</span><b>{m.intel.toFixed(1)}</b></div>
+          </div>
+        </div>
+        <div class="stats">
+          <div><span>blended $/1M</span><b>{m.blended_cost != null ? "$" + m.blended_cost.toFixed(2) : "—"}</b></div>
+          <div><span>tokens/s</span><b>{m.tokens_per_second != null ? Math.round(m.tokens_per_second) : "—"}</b></div>
+        </div>
+      </article>
+    ))}
+  </section>
+
+  <h2 class="section" id="providers"><a href="#providers" class="anchor">§</a> Providers ({providers.length})</h2>
+  <p style="color:var(--muted);font-size:0.85rem;margin:0 0 0.8rem;">Providers offering at least one of the {models.length} open-weight models above, with count of those models. Click for docs.</p>
+  <div class="provider-filters" id="provider-filters">
+    <span class="controls-label">HQ location</span>
+    <span class="filter-chip" data-ploc="us" data-active="true" tabindex="0">🇺🇸 US</span>
+    <span class="filter-chip" data-ploc="cn" data-active="true" tabindex="0">🇨🇳 China</span>
+    <span class="filter-chip" data-ploc="other" data-active="true" tabindex="0">🌍 Other</span>
+    <span class="filter-chip" data-ploc="unknown" data-active="true" tabindex="0">❓ Unknown</span>
+    <span class="controls-label" style="margin-left:1rem">KV cache</span>
+    <span class="filter-chip" data-cache="priced" data-active="true" tabindex="0">💰 Priced</span>
+    <span class="filter-chip" data-cache="all" data-active="true" tabindex="0">❌ Not priced</span>
+    <span class="controls-label" style="margin-left:1rem">Provider type</span>
+    <span class="filter-chip" data-ptype="model-maker" data-active="true" tabindex="0">Model maker</span>
+    <span class="filter-chip" data-ptype="proxy" data-active="true" tabindex="0">Proxy</span>
+    <span class="filter-chip" data-ptype="other" data-active="true" tabindex="0">Other</span>
+  </div>
+  <div class="providers-grid" id="providers-grid">
+    {providers.map((p) => {
+      const Tag = p.doc_url ? "a" : "span";
+      const hqAttr = p.hq || "unknown";
+      const ptypeAttr = p.ptype_key;
+      const cacheAttr = p.has_cache_read ? "priced" : "all";
+      let logoHtml;
+      if (p.domain) {
+        logoHtml = p.id ? (
+          <>
+            <img src={`${GOOGLE_FAVICONS_URL}${p.domain}`} alt={p.name} loading="lazy"
+              onerror={`this.onerror=null;this.src='${MODELSDEV_LOGOS_BASE}/${p.id}.svg';this.nextElementSibling.style.display='inline-block'`} />
+            <span class="logo-letter" style="display:none">{p.name.charAt(0)}</span>
+          </>
+        ) : (
+          <>
+            <img src={`${GOOGLE_FAVICONS_URL}${p.domain}`} alt={p.name} loading="lazy"
+              onerror={`this.style.display='none';this.nextElementSibling.style.display='inline-block'`} />
+            <span class="logo-letter" style="display:none">{p.name.charAt(0)}</span>
+          </>
+        );
+      } else if (p.id) {
+        logoHtml = (
+          <>
+            <img src={`${MODELSDEV_LOGOS_BASE}/${p.id}.svg`} alt={p.name} loading="lazy"
+              onerror={`this.style.display='none';this.nextElementSibling.style.display='inline-block'`} />
+            <span class="logo-letter" style="display:none">{p.name.charAt(0)}</span>
+          </>
+        );
+      } else {
+        logoHtml = <span class="logo-letter">{p.name.charAt(0)}</span>;
+      }
+      return (
+        <Tag class="provider-card" data-hq={hqAttr.toLowerCase()} data-cache={cacheAttr} data-ptype={ptypeAttr}
+          href={p.doc_url || undefined} target={p.doc_url ? "_blank" : undefined} rel={p.doc_url ? "noopener" : undefined}
+          style={`border-color: ${p.color}33;`}>
+          <span class="provider-card-logo" style={`background: ${p.color}20;`}>{logoHtml}</span>
+          <span class="provider-card-info">
+            <span class="provider-card-name">{p.name}</span>
+            {p.hq && <span class="loc-badge" title={`Headquarters: ${p.hq}`}>{p.hq_flag} {p.hq}</span>}
+            {p.datacenters.map((dc) => (
+              <span class="loc-badge loc-dc" title={`Datacenter: ${dc.code}`}>{dc.flag} {dc.code}</span>
+            ))}
+          </span>
+          <span class="provider-card-count" style={`color: ${p.color};`}>{p.count}</span>
+        </Tag>
+      );
+    })}
+  </div>
+
+  <script>
+    import "../scripts/scatter.js";
+  </script>
+  <script>
+    import "../scripts/nw-scatter.js";
+  </script>
+  <script>
+    import "../scripts/provider-filters.js";
+  </script>
+</BaseLayout>

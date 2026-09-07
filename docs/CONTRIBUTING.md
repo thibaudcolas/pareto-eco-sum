@@ -13,7 +13,7 @@ This document flags things to watch for when maintaining the Pareto eco sum proj
 ### models.dev
 
 - **New providers**: automatically picked up — `load_modelsdev()` iterates the full `providers` dict. The `modelsdev_provider_models` junction table (5,335 rows) is rebuilt on each run.
-- **Logo CDN**: logos are at `https://models.dev/logos/{provider_id}.svg`. If a provider has no logo, the HTML falls back to the first letter of the provider name. Google Favicons (`https://www.google.com/s2/favicons?sz=64&domain=`) are the primary logo source in the providers section, with models.dev SVGs as fallback.
+- **Logo CDN**: logos are at `https://models.dev/logos/{provider_id}.svg`. If a provider has no logo, the site falls back to the first letter of the provider name. Google Favicons (`https://www.google.com/s2/favicons?sz=64&domain=`) are the primary logo source in the providers section, with models.dev SVGs as fallback (domain is exported in `providers.json`).
 - **Slug normalization**: the `normalize_slug()` function replaces dots with dashes (models.dev uses `gemini-3.5-flash`, AA uses `gemini-3-5-flash`). If either source changes their slug format, this function needs updating.
 
 ### Neuralwatt
@@ -42,16 +42,28 @@ The matching from AA models → models.dev → Neuralwatt is a multi-step proces
 3. `create_enriched_view()`: LEFT JOINs all three sources. If any table is missing, the view still works but columns are NULL.
 
 Match rates as of last run:
-- AA → models.dev: 129/511 matched, 60 confirmed open-weight.
-- AA → Neuralwatt: 8/511 matched.
+- AA → models.dev: 184/643 matched, 92 confirmed open-weight.
+- AA → Neuralwatt: 9/643 matched.
 
-### HTML report JS
+### Site data export
 
-The HTML report has two inline `<script>` blocks:
-1. **AA scatter plot** (Observable Plot): X/Y axis switchers, location filter, custom DOM tooltips. The `render()` function filters data on both metrics and location. If you add metrics, extend `METRICS` / `X_METRICS` registries in the JS.
-2. **NW scatter plot**: regression line, variant vs base dots, custom tooltips.
+`fetch_models.py` no longer renders HTML. It exports eight JSON files to
+`src/data/` — this is the contract with the Astro front-end:
 
-Both use a shared `.tooltip-popup` CSS class. There are two tooltip elements in the DOM (one per script block) — they're independently selected by `document.querySelectorAll('.tooltip-popup')[0]` and `[1]`.
+1. `scatter.json` — one entry per open-weight model with agentic score + pricing, ordered by Agentic index DESC. Includes NW pricing/energy fields, the precomputed `release_label`, and the energy estimation outputs (`energy_per_req`, `nw_energy_estimated_mwh` — null when estimation didn't run).
+2. `nw-scatter.json` — Neuralwatt models with energy at the 16k–64k band and NW pricing (`is_variant` flags `-fast`/`-short` model ids).
+3. `regression.json` — linear regression of NW energy vs blended cost, base models only; nulls when fewer than 3 base points.
+4. `colors.json` — provider pid/name → hex color map (PROVIDER_COLORS exact → lowercase → FALLBACK_PALETTE by scatter order; NW providers appended with continuing indices).
+5. `legend.json` — legend entries in scatter-data provider order (id, name, color, logo_url, letter).
+6. `models.json` — model cards data (same rows, agentic DESC): resolved color, precomputed relative release label, blended cost, capabilities, and per-model provider list (doc_url=null for providers without docs).
+7. `providers.json` — provider directory from `provider_section_rows` (count, HQ + flag, deduped datacenters excluding HQ, favicon domain, has_cache_read, `ptype_key` (machine value: `model-maker` | `proxy` | `other`), color). `scatter.json` uses the same machine key in its `provider_type` field.
+8. `meta.json` — `{generated_at}` build timestamp (`YYYY-MM-DD HH:MM UTC`).
+
+Every object key is always present (null for missing values) — the front-end relies on
+the schema being stable. If you add or rename a key here, update the Astro site in the
+same commit. Do not move data analysis to the front-end: all computation (blended-cost
+formulas, regression, energy estimation, provider typing, colors, relative-date labels)
+stays in `fetch_models.py`. These files are committed; re-export after data refreshes.
 
 ### Cached data
 
@@ -69,6 +81,5 @@ All cached API responses live in `data/cache/` with 24h TTL. If you need fresh d
 ## Code style
 
 - No comments in the Python source (per project convention).
-- F-strings with double braces `{{` / `}}` for literal braces inside the JS embedded in Python f-strings.
-- The HTML template is a single large f-string — be careful with `escape()` calls and CSS `{{ }}`.
-- JS uses `(function () { ... })();` IIFE pattern — don't forget the trailing `()` to invoke it.
+- The site front-end is Astro at the repo root — no JS-in-f-strings anymore; edit
+  `src/` components directly (another workstream's domain).

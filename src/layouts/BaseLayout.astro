@@ -1,0 +1,42 @@
+---
+import "../styles/global.css";
+import meta from "../data/meta.json";
+
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta
+      name="description"
+      content="Comparing benchmark scores, pricing, and energy use across open-weight language models and their providers."
+    />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1 id="top">Open-weight LLM landscape</h1>
+        <p>Comparing benchmark scores, pricing, and energy use across open-weight language models and their providers.</p>
+        <p>Built with <a href="https://artificialanalysis.ai/models/glm-5-2" target="_blank" rel="noopener">GLM-5.2</a> on
+          <a href="https://neuralwatt.com" target="_blank" rel="noopener">Neuralwatt</a> ·
+          <span title="Total energy and carbon cost of building this report">1.60 kWh · 193.7 g CO₂</span> ·
+          Data: <a href="https://artificialanalysis.ai/api/v2/language/models/free">Artificial Analysis</a> ·
+          <a href="https://models.dev/catalog.json">models.dev</a> ·
+          <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt</a> ·
+          <a href="https://openrouter.ai/api/v1/providers">OpenRouter</a> · generated {meta.generated_at}</p>
+      </header>
+
+      <slot />
+
+      <footer>Logos from models.dev. Scores subject to Intelligence Index version in the AA response; see
+        <a href="https://artificialanalysis.ai/methodology/intelligence-benchmarking">methodology</a>.</footer>
+    </div>
+  </body>
+</html>
