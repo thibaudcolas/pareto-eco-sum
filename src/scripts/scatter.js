@@ -19,9 +19,9 @@ if (data.length) {
     intel:   { field: "intel",   label: "Intelligence Index (Artificial Analysis)" },
   };
   const X_METRICS = {
+    energy_per_req:  { field: "energy_per_req",  label: "Energy per request (mWh) — 16k–64k band", fmt: (d) => d + " mWh" },
     blended_cost:    { field: "blended_cost",  label: "Blended cost / 1M tokens (USD) — 7 cache · 2 input · 1 output", fmt: (d) => "$" + d.toFixed(2) },
     cost_per_task:   { field: "cost_per_task", label: "Cost per Intelligence Index task (USD)", fmt: (d) => "$" + d.toFixed(2) },
-    energy_per_req:  { field: "energy_per_req",  label: "Energy per request (mWh) — 16k–64k band", fmt: (d) => d + " mWh" },
   };
 
   // Build a small HTML tooltip body, highlighting the active Y-metric row.
@@ -30,8 +30,7 @@ if (data.length) {
       ["Agentic", fmtNum(d.agentic, 2), "agentic"],
       ["Coding", fmtNum(d.coding, 1), "coding"],
       ["Intelligence", fmtNum(d.intel, 1), "intel"],
-      ["Blended cost / 1M", fmtMoney(d.blended_cost), null],
-      ["Cost / II task", fmtMoney(d.cost_per_task), null],
+      ["Energy @ 16k–64k", d.energy_per_req != null ? fmtNum(d.energy_per_req, 2) + " mWh" : "n/a"],
       ["  · cache hit", fmtMoney(d.cache_hit_price), null],
       ["  · input", fmtMoney(d.input_price), null],
       ["  · output", fmtMoney(d.output_price), null],
@@ -59,17 +58,21 @@ if (data.length) {
         + "View weights on Hugging Face →</a>"
       : "";
     // Neuralwatt section — only when an AA model matched a Neuralwatt model.
+    // Energy source line distinguishes measured (NW-matched) vs estimated
+    // (k × blended cost) energy values.
+    const energySourceLine = d.energy_source === "measured" ? "measured (Neuralwatt)"
+      : d.energy_source === "estimated" ? "estimated (k × blended cost)" : null;
     const nwRows = d.nw_model_id ? [
+      ["Energy source", energySourceLine || "n/a"],
       ["NW blended cost / 1M", fmtMoney(d.nw_blended_cost)],
       ["  · input", fmtMoney(d.nw_input_per_million)],
       ["  · output", fmtMoney(d.nw_output_per_million)],
       ["  · cached input", fmtMoney(d.nw_cached_input_per_million)],
-      ["Energy @ 16k–64k", d.nw_energy_mwh_16k_64k != null ? fmtNum(d.nw_energy_mwh_16k_64k, 2) + " mWh" : "n/a"],
+      ["NW energy @ 16k–64k", d.nw_energy_mwh_16k_64k != null ? fmtNum(d.nw_energy_mwh_16k_64k, 2) + " mWh" : "n/a"],
       ["  · cache-hit rate", d.nw_cache_hit_rate_16k_64k != null ? fmtNum(d.nw_cache_hit_rate_16k_64k, 0) + "%" : "n/a"],
       ["  · share of reqs", d.nw_request_share_16k_64k != null ? fmtNum(d.nw_request_share_16k_64k, 1) + "%" : "n/a"],
-    ] : (d.nw_energy_estimated_mwh != null ? [
-      ["Energy @ 16k–64k", "≈ " + fmtNum(d.nw_energy_estimated_mwh, 0) + " mWh (est.)"],
-      ["  · derived from", "NW cost ↔ energy regression"],
+    ] : (energySourceLine ? [
+      ["Energy source", energySourceLine],
     ] : []);
     const nwHtml = nwRows.length
       ? "<div style=\"margin-top:8px;padding-top:6px;border-top:1px solid #243044\">" +
@@ -157,12 +160,17 @@ if (data.length) {
         grid: true,
       },
       marks: [
-        Plot.dot(plotData, {
-          x: xMetric.field, y: yMetric.field,
-          fill: (d) => colorFor(d.provider_id || d.provider_name),
-          stroke: "#0c1018", strokeWidth: 1.2,
-          r: 8, opacity: 0.95,
-        }),
+      // Measured vs estimated energy: solid = measured (NW-matched),
+      // hollow (fill transparent, provider-colored ring) = estimated
+      // (k × blended cost).
+      Plot.dot(plotData, {
+        x: xMetric.field, y: yMetric.field,
+        fill: (d) => d.energy_source === "estimated" ? "none" : colorFor(d.provider_id || d.provider_name),
+        fillOpacity: (d) => d.energy_source === "estimated" ? 0 : 0.95,
+        stroke: (d) => colorFor(d.provider_id || d.provider_name),
+        strokeWidth: (d) => d.energy_source === "estimated" ? 1.8 : 1.2,
+        r: (d) => d.energy_source === "estimated" ? 6.5 : 8,
+      }),
         // Pareto frontier line.
         ...(paretoFrontier.length >= 2 ? [Plot.line(paretoFrontier, {
           x: xMetric.field, y: yMetric.field,
@@ -196,7 +204,7 @@ if (data.length) {
   }
 
   // Track current selections.
-  let currentX = "blended_cost";
+  let currentX = "energy_per_req";
   let currentY = "agentic";
 
   // Initial render.

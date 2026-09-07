@@ -12,10 +12,14 @@ const GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain=";
 // Model cards: modality chips (first 3 letters of each input modality, CSS capitalizes).
 const inputMods = (m: string) => m.split(",").map((x) => x.trim()).filter(Boolean);
 
+// Energy split for the comparison chart legend: measured (Neuralwatt match)
+// vs estimated (k × blended cost) energy values.
+const measuredCount = scatter.filter((m) => m.energy_source === "measured").length;
+const estimatedCount = scatter.filter((m) => m.energy_source === "estimated").length;
 ---
 
 <BaseLayout title="Open-weight LLM landscape — benchmarks, pricing & energy">
-  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Model comparison — {scatter.length} open-weight models</h2>
+  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Model comparison — capability vs energy — {scatter.length} open-weight models</h2>
   <div class="scatter-wrap">
     <div class="provider-legend">
       {legend.map((prov) => (
@@ -38,17 +42,17 @@ const inputMods = (m: string) => m.split(",").map((x) => x.trim()).filter(Boolea
     </div>
     <div class="scatter-controls">
       <span class="controls-label">X axis</span>
-      <label class="metric-radio x-metric" data-xmetric="blended_cost" data-active="true">
-        <input type="radio" name="xmetric" value="blended_cost" checked />
+      <label class="metric-radio x-metric" data-xmetric="energy_per_req" data-active="true">
+        <input type="radio" name="xmetric" value="energy_per_req" checked />
+        <span>Energy / req</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="blended_cost">
+        <input type="radio" name="xmetric" value="blended_cost" />
         <span>Cost / 1M tok</span>
       </label>
       <label class="metric-radio x-metric" data-xmetric="cost_per_task">
         <input type="radio" name="xmetric" value="cost_per_task" />
         <span>Cost / task</span>
-      </label>
-      <label class="metric-radio x-metric" data-xmetric="energy_per_req">
-        <input type="radio" name="xmetric" value="energy_per_req" />
-        <span>Energy / req</span>
       </label>
     </div>
     <div class="scatter-controls">
@@ -102,17 +106,28 @@ const inputMods = (m: string) => m.split(",").map((x) => x.trim()).filter(Boolea
         <input type="checkbox" checked /> Other
       </label>
     </div>
+    <div class="provider-legend">
+      <span class="legend-item">
+        <span class="swatch swatch-measured"></span>
+        <span class="legend-name">Measured (Neuralwatt) — {measuredCount}</span>
+      </span>
+      <span class="legend-item">
+        <span class="swatch swatch-estimated"></span>
+        <span class="legend-name">Estimated (k × blended cost) — {estimatedCount}</span>
+      </span>
+    </div>
     <div id="scatter-plot"></div>
-    <p class="plot-note">Blended cost = <code>(7·cache + 2·input + 1·output)/10</code>. When a provider omits cache-hit pricing, the input price is used as an upper bound (cache hits are never more expensive than a regular input token). <strong>{scatter.length} models shown</strong>: open-weight (via models.dev), with an Agentic Index score AND input + output pricing. Models without input or output pricing are excluded. Neuralwatt energy values in tooltips are measured when an AA model matches a NW model; otherwise the tooltip shows an <strong>estimated</strong> energy derived from the NW cost ↔ energy regression (see the Neuralwatt scatter below).</p>
+    <p class="plot-note">Blended cost = <code>(7·cache + 2·input + 1·output)/10</code>. When a provider omits cache-hit pricing, the input price is used as an upper bound (cache hits are never more expensive than a regular input token). <strong>{scatter.length} models shown</strong>: open-weight (via models.dev), with an Agentic Index score AND input + output pricing. Models without input or output pricing are excluded. Energy per request (16k–64k band) is <strong>measured</strong> (solid dots) for {measuredCount} models with a Neuralwatt match, and <strong>estimated</strong> as <code>k × blended cost</code> (hollow dots) for the remaining {estimatedCount} — see the Neuralwatt calibration below.</p>
   </div>
 
-  <h2 class="section" id="neuralwatt"><a href="#neuralwatt" class="anchor">§</a> Neuralwatt — Energy use vs. cost ({nwScatter.length} models, 16k–64k band)</h2>
+  <h2 class="section" id="neuralwatt"><a href="#neuralwatt" class="anchor">§</a> Neuralwatt — Energy calibration ({nwScatter.length} models, 16k–64k band)</h2>
   <div class="scatter-wrap">
     <div id="nw-scatter-plot"></div>
-    <p class="plot-note">X: NW blended cost per 1M tokens = <code>(7·cache + 2·input + 1·output)/10</code> (USD, from Neuralwatt pricing).
-      Y: energy per request at the 16k–64k prompt-size band (mWh, scraped from the
-      <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt portal</a>).
-      Dashed line: linear regression on base models only (excluding -fast / -short variants).
+    <p class="plot-note">Calibration view: measured energy per request (mWh, 16k–64k band, scraped from the
+      <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt portal</a>) against NW blended cost per 1M
+      tokens = <code>(7·cache + 2·input + 1·output)/10</code> (USD). Dashed line: proportional fit
+      <code>energy = k × cost</code> through the origin, fitted on base models only (excluding -fast / -short variants);
+      this k is used to estimate energy for the models without a Neuralwatt match in the comparison chart above.
       Hover any dot for details.</p>
   </div>
 

@@ -1300,7 +1300,7 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
             "provider_hqs": r[30] or "",
             "has_cache_priced_provider": bool(r[31]) if r[31] is not None else False,
             "energy_per_req": None,
-            "nw_energy_estimated_mwh": None,
+            "energy_source": None,
         }
         for r in scatter_rows
     ]
@@ -1350,15 +1350,18 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
         for r in nw_scatter_rows
     ]
 
-    # --- Linear regression: energy_mwh ~ slope * blended_cost + intercept ---
-    # Computed on NW base models only (excluding -fast / -short variants) so the
-    # relationship reflects the "canonical" model, not tuned variants.
-    regression: dict[str, Any] = {
-        "n": 0,
-        "slope": None,
-        "intercept": None,
+    # --- Proportional calibration: energy_mwh = k × blended_cost ---
+    # Owner's modeling assumption: energy use is proportional to cost on
+    # Neuralwatt (no intercept). Least squares through the origin, on NW base
+    # models only (excluding -fast / -short variants) so the relationship
+    # reflects the "canonical" model, not tuned variants.
+    calibration: dict[str, Any] = {
+        "kind": "proportional",
+        "k": None,
         "r": None,
         "r_squared": None,
+        "n": 0,
+        "band": "16k–64k",
     }
     base_points = [
         (d["blended_cost"], d["energy_mwh"])
@@ -1374,65 +1377,39 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
         ss_xx = sum((x - mean_x) ** 2 for x in xs)
         ss_xy = sum((x - mean_x) * (y - mean_y) for x, y in base_points)
         ss_yy = sum((y - mean_y) ** 2 for y in ys)
-        if ss_xx > 0:
-            slope = ss_xy / ss_xx
-            intercept = mean_y - slope * mean_x
-            r = ss_xy / math.sqrt(ss_xx * ss_yy) if ss_yy > 0 else 0.0
-            regression = {
-                "n": n,
-                "slope": round(slope, 2),
-                "intercept": round(intercept, 2),
-                "r": round(r, 4),
-                "r_squared": round(r * r, 4),
-            }
+        sum_x2 = sum(x * x for x in xs)
+        sum_xy = sum(x * y for x, y in base_points)
+        if sum_x2 > 0:
+            k = sum_xy / sum_x2
+            r = ss_xy / math.sqrt(ss_xx * ss_yy) if ss_xx > 0 and ss_yy > 0 else 0.0
+            calibration.update(
+                {
+                    "k": round(k, 2),
+                    "r": round(r, 4),
+                    "r_squared": round(r * r, 4),
+                    "n": n,
+                }
+            )
             print(
-                f"Neuralwatt regression (n={n}): energy_mWh = {regression['slope']} × cost + {regression['intercept']} (r={regression['r']}, r²={regression['r_squared']})"
+                f"Neuralwatt calibration (n={n}): energy_mWh = {calibration['k']} × blended_cost (r={calibration['r']}, r²={calibration['r_squared']})"
             )
 
-    # Ratio between NW blended cost and AA blended cost for each matched model.
-    # This lets us estimate NW blended cost for unmatched models from their AA
-    # blended cost.
-    nw_aa_cost_ratios: list[float] = []
-    for entry in scatter_data:
-        nw_c = entry.get("nw_blended_cost")
-        aa_c = entry.get("blended_cost")
-        if nw_c and aa_c and aa_c > 0:
-            nw_aa_cost_ratios.append(nw_c / aa_c)
-    avg_nw_aa_ratio = (
-        (sum(nw_aa_cost_ratios) / len(nw_aa_cost_ratios)) if nw_aa_cost_ratios else 1.0
-    )
-
-    # Apply estimated energy to AA scatter entries.
-    # Use NW blended cost when available; for unmatched models, estimate NW
-    # blended cost from AA blended cost × avg ratio so the regression input
-    # matches what the model would cost on Neuralwatt.
-    if regression["slope"] is not None:
+    # Inference: for ANY open-weight model with an AA blended cost, estimated
+    # energy = k × AA blended cost. Measured NW energy wins when a NW match
+    # exists. Models without a positive blended cost (free / unpriced) get no
+    # energy value — cost 0 implies energy 0 under proportionality, which is
+    # not a meaningful estimate.
+    if calibration["k"] is not None:
         for entry in scatter_data:
             measured = entry.get("nw_energy_mwh_16k_64k")
             if measured is not None:
                 entry["energy_per_req"] = measured
-                continue  # has measured NW energy — no estimation needed
-            # Estimate NW blended cost: use actual NW blended cost if the model
-            # has NW pricing; otherwise scale the AA blended cost by the average
-            # NW/AA cost ratio.
-            nw_blended = entry.get("nw_blended_cost")
-            if nw_blended and nw_blended > 0:
-                est_cost = nw_blended
-            else:
-                aa_blended = entry.get("blended_cost")
-                if aa_blended and aa_blended > 0:
-                    est_cost = aa_blended * avg_nw_aa_ratio
-                else:
-                    continue
-            predicted = regression["slope"] * est_cost + regression["intercept"]
-            # Clamp at the minimum observed energy from the regression data so
-            # very cheap models don't get estimated at 0 mWh (which is physically
-            # implausible). Use the lowest measured energy from base models.
-            min_energy = min((p[1] for p in base_points), default=0)
-            entry["nw_energy_estimated_mwh"] = round(
-                max(min_energy * 0.5, predicted), 2
-            )
-            entry["energy_per_req"] = entry["nw_energy_estimated_mwh"]
+                entry["energy_source"] = "measured"
+                continue
+            aa_blended = entry.get("blended_cost")
+            if aa_blended and aa_blended > 0:
+                entry["energy_per_req"] = round(calibration["k"] * aa_blended, 2)
+                entry["energy_source"] = "estimated"
 
     # Provider color map: brand color if known, else derive from the provider's
     # position in the list so each provider gets a stable, distinct color.
@@ -1644,7 +1621,7 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
 
     _write_json(SITE_DATA_DIR / "scatter.json", scatter_data)
     _write_json(SITE_DATA_DIR / "nw-scatter.json", nw_scatter_data)
-    _write_json(SITE_DATA_DIR / "regression.json", regression)
+    _write_json(SITE_DATA_DIR / "calibration.json", calibration)
     _write_json(SITE_DATA_DIR / "colors.json", color_map)
     _write_json(SITE_DATA_DIR / "legend.json", legend)
     _write_json(SITE_DATA_DIR / "models.json", model_entries)
@@ -1654,7 +1631,7 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
     print(f"\nWrote site data to {SITE_DATA_DIR}:")
     print(f"  scatter.json:    {len(scatter_data)} models")
     print(f"  nw-scatter.json: {len(nw_scatter_data)} models")
-    print(f"  regression.json: n={regression['n']}")
+    print(f"  calibration.json: n={calibration['n']} k={calibration['k']}")
     print(f"  colors.json:     {len(color_map)} providers")
     print(f"  legend.json:     {len(legend)} providers")
     print(f"  models.json:     {len(model_entries)} models")

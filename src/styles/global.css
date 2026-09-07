@@ -34,6 +34,9 @@
     border: 1px solid var(--border); background: var(--surface-2); }
   .legend-item:hover { border-color: var(--accent); }
   .legend-item .swatch { width: 0.7em; height: 0.7em; border-radius: 999px; flex: none; }
+  /* Measured vs estimated energy legend (main scatter). */
+  .legend-item .swatch-measured { background: var(--text); opacity: 0.95; }
+  .legend-item .swatch-estimated { background: transparent; border: 2px solid var(--text); opacity: 0.55; }
   .legend-logo {
     width: 20px; height: 20px; border-radius: 4px; overflow: hidden;
     display: inline-flex; align-items: center; justify-content: center; flex: none;

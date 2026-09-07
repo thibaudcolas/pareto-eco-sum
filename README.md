@@ -6,9 +6,9 @@ Data-driven exploration of open weight AI models and providers, based on perform
 
 This project fetches, cross-references, and visualizes data about open-weight language models from four sources:
 
-1. **[Artificial Analysis](https://artificialanalysis.ai)** — benchmark scores (Intelligence, Coding, Agentic indices), pricing, and performance metrics for 511 LLMs.
+1. **[Artificial Analysis](https://artificialanalysis.ai)** — benchmark scores (Intelligence, Coding, Agentic indices), pricing, and performance metrics for 643 LLMs.
 2. **[models.dev](https://models.dev)** — provider-agnostic model metadata (open weights, modalities, context window), provider catalog, and which providers offer which models (5,335 provider→model links).
-3. **[Neuralwatt](https://portal.neuralwatt.com)** — per-request energy consumption (mWh) measured from real traffic, plus Neuralwatt's own pricing, for 12 models across 7 prompt-size bands.
+3. **[Neuralwatt](https://portal.neuralwatt.com)** — per-request energy consumption (mWh) measured from real traffic, plus Neuralwatt's own pricing, for 19 models across 7 prompt-size bands.
 4. **[OpenRouter](https://openrouter.ai)** — provider metadata (86 providers): headquarters location (ISO 3166-1 alpha-2), datacenter locations, and documentation URLs.
 
 All data is stored in a single DuckDB file (`data/pareto.duckdb`). The report is an
@@ -16,7 +16,7 @@ All data is stored in a single DuckDB file (`data/pareto.duckdb`). The report is
 snapshots in `src/data/` (exported by `fetch_models.py`) with:
 
 - **Scatter plot** of open-weight models that pass the filters (X: blended cost or energy, Y: Agentic/Coding/Intelligence index) with Observable Plot, provider-colored dots, hover tooltips, and US/China/Other location filters.
-- **Neuralwatt scatter plot** of the available Neuralwatt models (X: NW blended cost, Y: energy per request at 16k–64k band) with a linear regression line and correlation statistics.
+- **Neuralwatt scatter plot** of the available Neuralwatt models (X: NW blended cost, Y: energy per request at 16k–64k band) with a proportional cost→energy calibration line and correlation statistics.
 - **Model cards** for the same open-weight models with provider logos, capability chips (reasoning, tool calling, modalities, context window), Neuralwatt energy badges, and links to every provider offering the model.
 - **Providers section** listing providers that offer those open-weight models, with favicon logos, headquarters/datacenter flags, and model counts.
 
@@ -147,7 +147,7 @@ For Neuralwatt, matching is by display name: exact match first, then "AA name st
 - `src/scripts/scatter.js` — main comparison scatter (X/Y metric radios,
   location / KV-cache / provider-type filters, Pareto frontier, tooltips)
 - `src/scripts/nw-scatter.js` — Neuralwatt energy-vs-cost scatter with
-  regression line and variant styling
+  proportional calibration line and variant styling
 - `src/scripts/provider-filters.js` — provider card filter chips
 - `src/styles/global.css` — page styles (ported verbatim from the generator)
 - `src/data/*.json` — data snapshots (see schemas in the repo docs)

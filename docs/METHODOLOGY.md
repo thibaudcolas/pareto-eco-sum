@@ -23,7 +23,7 @@ When a model has no published cache-hit price (AA `price_1m_cache_hit_tokens` is
 effective_cache_hit = COALESCE(cache_hit_price, input_price)
 ```
 
-This is conservative: cache hits are never more expensive than a regular input token, so using the input price as a proxy slightly overestimates cost (and thus overestimates energy via the regression). Models with $0 cache pricing (e.g. DeepSeek V4 Flash) use 0 directly.
+This is conservative: cache hits are never more expensive than a regular input token, so using the input price as a proxy slightly overestimates cost (and thus overestimates energy via the cost-proportionality estimate). Models with $0 cache pricing (e.g. DeepSeek V4 Flash) use 0 directly.
 
 ## Cost-per-task
 
@@ -31,52 +31,60 @@ Artificial Analysis provides `artificial_analysis_intelligence_index_cost.cost_p
 
 This is distinct from the blended cost per 1M tokens: cost-per-task includes the actual token counts consumed by the benchmark, not just the pricing rates.
 
-## Energy estimation via cost regression
+## Energy estimation via cost proportionality
 
 ### Motivation
 
-Neuralwatt provides measured energy per request for a small set of models at the 16k–64k prompt-size band. To estimate energy for open-weight models that don't have a direct Neuralwatt match, we derive a linear regression from Neuralwatt's own data.
+Neuralwatt provides measured energy per request for a small set of models at the 16k–64k prompt-size band. To estimate energy for open-weight models that don't have a direct Neuralwatt match, we use the owner's modeling assumption: **energy use is proportional to cost on Neuralwatt** (`energy = k × blended_cost`, no intercept). Cost scales with compute delivered per request, and compute is what consumes energy — so the model is as simple as possible while fitting the measured data.
 
 ### Data selection
 
-The regression is computed on **base models only** — excluding Neuralwatt variants with `-fast`, `-short`, or `-short-fast` suffixes. This ensures the relationship reflects the "canonical" model, not tuned variants that may have different energy/cost tradeoffs.
+The calibration is computed on **base models only** — excluding Neuralwatt variants with `-fast`, `-short`, or `-short-fast` suffixes. This ensures the relationship reflects the "canonical" model, not tuned variants that may have different energy/cost tradeoffs.
 
 Base models used (n=6):
 
-| Model            | NW blended cost | Energy (mWh) |
-| ---------------- | ---------------: | -----------: |
-| Qwen3.6 35B      |          $0.2237 |       111.65 |
-| Kimi K2.6 (alt)  |          $0.4540 |       594.67 |
-| Kimi K2.6        |          $0.5807 |       594.67 |
-| Qwen3.5 397B     |          $0.6727 |       262.29 |
-| Kimi K2.7 Code   |          $0.7562 |       766.63 |
-| GLM-5.2          |          $0.9938 |      1480.00 |
+| Model             | NW blended cost | Energy (mWh) |
+| ----------------- | ---------------: | -----------: |
+| Qwen3.6 35B       |          $0.1933 |        64.54 |
+| Gemma 4 31B       |         $0.08088 |       295.63 |
+| DeepSeek V4 Flash |          $0.0756 |       302.16 |
+| Kimi K2.7 Code    |          $0.6565 |       586.93 |
+| GLM-5.2           |          $0.8415 |      1460.00 |
+| Kimi K3           |           $2.3100 |      1900.00 |
 
-### Regression results
+### Calibration results
+
+Least squares through the origin:
 
 ```
-energy_mWh = 1527.11 × blended_cost + (−301.96)
-Pearson r = 0.8397
-r² = 0.7050
+k = Σ(cost × energy) / Σ(cost²)
+```
+
+```
+energy_mWh = 929.09 × blended_cost
+Pearson r = 0.9097
+r² = 0.8275
 n = 6
 ```
 
-The correlation is moderate (r² ≈ 0.71). This means ~70% of the variance in energy consumption is explained by blended cost. The remaining 30% depends on model architecture, quantization, and serving infrastructure — factors not captured by price alone.
+The correlation is strong (r² ≈ 0.83): ~83% of the variance in energy consumption is explained by blended cost. The remaining 17% depends on model architecture, quantization, and serving infrastructure — factors not captured by price alone. The fitted k (929 mWh per blended $) sits between the per-model energy/cost ratios (334–3997 mWh/$), weighted toward the most expensive models, which contribute most to Σ(cost²).
 
-### NW/AA cost ratio correction
+### What was removed, and why
 
-The same model can have different pricing on Neuralwatt vs. other providers. For example, GLM-5.2 costs $0.90/1M (blended) on Artificial Analysis but $0.99/1M on Neuralwatt. To ensure the regression input matches what the model would cost on Neuralwatt:
+The previous model was an affine regression (`energy = slope × cost + intercept`, fitted at 1527 × cost − 302 mWh). Its negative intercept implied zero cost at ~200 mWh of energy — physically implausible — and forced two workarounds that are gone with the proportional model:
 
-- For models with a Neuralwatt match: use the **NW blended cost** directly.
-- For models without a NW match: estimate NW blended cost as `AA_blended_cost × avg_nw_aa_ratio`, where `avg_nw_aa_ratio` is the average (NW blended / AA blended) ratio across all matched models (currently ~1.06).
+- **NW/AA cost-ratio correction**: the affine regression was fit against NW blended cost, so AA costs had to be rescaled by an average NW/AA ratio (~1.06) before prediction. Under proportionality, energy is estimated directly from the AA blended cost — `k × AA_blended_cost` — with no rescaling.
+- **Energy floor**: the intercept predicted negative energy below ~$0.20/1M, so estimates were clamped at `min_measured_energy × 0.5` (≈ 55.8 mWh). With no intercept, predictions are non-negative everywhere, so no floor is needed.
 
-### Energy floor
+### Inference rule
 
-The linear model predicts negative energy for costs below ~$0.20/1M (intercept = −302 mWh), which is physically implausible. Instead of clamping to 0, we use a floor of `min_measured_energy × 0.5` (≈ 55.83 mWh, half of the cheapest measured base model). This ensures even the cheapest models have a non-zero energy estimate while acknowledging the regression's limitations at the low end.
+For every open-weight model in the scatter data:
 
-### Energy per task
+- **Measured wins**: if the model matches a Neuralwatt model, `energy_per_req` is the measured NW energy (16k–64k band) and `energy_source` is `"measured"`.
+- Otherwise, if the model has a positive AA blended cost: `energy_per_req = k × AA_blended_cost` and `energy_source` is `"estimated"`.
+- Models with no cost (free models, blended cost 0 or null): `energy_per_req` and `energy_source` are null — cost 0 would imply 0 energy, which is not a meaningful estimate.
 
-For energy per Intelligence Index task, the same regression is applied to the `cost_per_task` value (after the NW/AA ratio correction). This gives an estimate of how much energy a full benchmark evaluation task would consume.
+The fitted constant and fit statistics are exported in `src/data/calibration.json` (`{kind: "proportional", k, r, r_squared, n, band}`); k is in mWh per blended dollar.
 
 ## Neuralwatt energy bands
 

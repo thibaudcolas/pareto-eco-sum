@@ -43,16 +43,16 @@ The matching from AA models → models.dev → Neuralwatt is a multi-step proces
 
 Match rates as of last run:
 - AA → models.dev: 184/643 matched, 92 confirmed open-weight.
-- AA → Neuralwatt: 9/643 matched.
+- AA → Neuralwatt: 14/643 matched.
 
 ### Site data export
 
 `fetch_models.py` no longer renders HTML. It exports eight JSON files to
 `src/data/` — this is the contract with the Astro front-end:
 
-1. `scatter.json` — one entry per open-weight model with agentic score + pricing, ordered by Agentic index DESC. Includes NW pricing/energy fields, the precomputed `release_label`, and the energy estimation outputs (`energy_per_req`, `nw_energy_estimated_mwh` — null when estimation didn't run).
+1. `scatter.json` — one entry per open-weight model with agentic score + pricing, ordered by Agentic index DESC. Includes NW pricing/energy fields, the precomputed `release_label`, and the energy outputs: `energy_per_req` (measured NW energy when the model matches Neuralwatt, else `k × AA blended cost`) and `energy_source` (`"measured"` | `"estimated"` | null when there is no energy value, e.g. free models).
 2. `nw-scatter.json` — Neuralwatt models with energy at the 16k–64k band and NW pricing (`is_variant` flags `-fast`/`-short` model ids).
-3. `regression.json` — linear regression of NW energy vs blended cost, base models only; nulls when fewer than 3 base points.
+3. `calibration.json` — proportional cost→energy calibration (`{kind: "proportional", k, r, r_squared, n, band}`), fitted through the origin on NW base models only; k null when fewer than 3 base points.
 4. `colors.json` — provider pid/name → hex color map (PROVIDER_COLORS exact → lowercase → FALLBACK_PALETTE by scatter order; NW providers appended with continuing indices).
 5. `legend.json` — legend entries in scatter-data provider order (id, name, color, logo_url, letter).
 6. `models.json` — model cards data (same rows, agentic DESC): resolved color, precomputed relative release label, blended cost, capabilities, and per-model provider list (doc_url=null for providers without docs).
@@ -62,7 +62,7 @@ Match rates as of last run:
 Every object key is always present (null for missing values) — the front-end relies on
 the schema being stable. If you add or rename a key here, update the Astro site in the
 same commit. Do not move data analysis to the front-end: all computation (blended-cost
-formulas, regression, energy estimation, provider typing, colors, relative-date labels)
+formulas, energy calibration, energy estimation, provider typing, colors, relative-date labels)
 stays in `fetch_models.py`. These files are committed; re-export after data refreshes.
 
 ### Cached data
