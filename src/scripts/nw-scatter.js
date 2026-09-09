@@ -22,13 +22,13 @@ if (nwData.length) {
       ["  · cache-hit rate", d.cache_hit_rate != null ? fmtNum(d.cache_hit_rate, 0) + "%" : "n/a"],
       ["  · share of reqs", d.request_pct != null ? fmtNum(d.request_pct, 1) + "%" : "n/a"],
     ];
-    const variantTag = d.is_variant ? " <span style=\"color:#8b97a8;font-weight:400\">(variant)</span>" : "";
+    const variantTag = d.is_variant ? " <span style=\"color:var(--muted);font-weight:400\">(variant)</span>" : "";
     return "<div style=\"font-weight:600;margin-bottom:4px\">" + escapeHtml(d.name) + variantTag + "</div>" +
-      "<div style=\"color:#8b97a8;margin-bottom:6px\">" + escapeHtml(d.provider || "?") + "</div>" +
-      "<div style=\"color:#5b8def;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px\">Neuralwatt</div>" +
+      "<div style=\"color:var(--muted);margin-bottom:6px\">" + escapeHtml(d.provider || "?") + "</div>" +
+      "<div style=\"color:var(--accent);font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px\">Neuralwatt</div>" +
       rows.map(([k, v]) =>
         "<div style=\"display:flex;justify-content:space-between;gap:1em\">" +
-        "<span style=\"color:#8b97a8\">" + escapeHtml(k) + "</span>" +
+        "<span style=\"color:var(--muted)\">" + escapeHtml(k) + "</span>" +
         "<span style=\"font-variant-numeric:tabular-nums\">" + escapeHtml(String(v)) + "</span></div>"
       ).join("");
   };
@@ -82,7 +82,7 @@ if (nwData.length) {
         x: "blended_cost", y: "energy_mwh",
         text: (d) => shortName(d.name, 24),
         fontSize: 9.5, dx: 12, dy: -8, textAnchor: "start",
-        fill: "#e6edf3", fillOpacity: 0.78, fontWeight: 500,
+        fill: "var(--text)", fillOpacity: 0.78, fontWeight: 500,
         pointerEvents: "none",
       }),
     ],

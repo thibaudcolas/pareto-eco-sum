@@ -47,7 +47,7 @@ if (data.length) {
       const style = isActive
         ? "display:flex;justify-content:space-between;gap:1em;color:var(--text);font-weight:600"
         : "display:flex;justify-content:space-between;gap:1em";
-      const keyStyle = isActive ? "color:var(--text)" : "color:#8b97a8";
+      const keyStyle = isActive ? "color:var(--text)" : "color:var(--muted)";
       return "<div style=\"" + style + "\"><span style=\"" + keyStyle + "\">" +
         escapeHtml(k) + "</span><span style=\"font-variant-numeric:tabular-nums\">" +
         escapeHtml(String(v)) + "</span></div>";
@@ -75,16 +75,16 @@ if (data.length) {
       ["Energy source", energySourceLine],
     ] : []);
     const nwHtml = nwRows.length
-      ? "<div style=\"margin-top:8px;padding-top:6px;border-top:1px solid #243044\">" +
-        "<div style=\"color:#5b8def;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px\">Neuralwatt</div>" +
+      ? "<div style=\"margin-top:8px;padding-top:6px;border-top:1px solid var(--border)\">" +
+        "<div style=\"color:var(--accent);font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px\">Neuralwatt</div>" +
         nwRows.map(([k, v]) =>
           "<div style=\"display:flex;justify-content:space-between;gap:1em\">" +
-          "<span style=\"color:#8b97a8\">" + escapeHtml(k) + "</span>" +
+          "<span style=\"color:var(--muted)\">" + escapeHtml(k) + "</span>" +
           "<span style=\"font-variant-numeric:tabular-nums\">" + escapeHtml(String(v)) + "</span></div>"
         ).join("") + "</div>"
       : "";
     return "<div style=\"font-weight:600;margin-bottom:4px\">" + escapeHtml(d.name) + "</div>" +
-      "<div style=\"color:#8b97a8;margin-bottom:6px\">" + escapeHtml(d.provider_name) + "</div>" +
+      "<div style=\"color:var(--muted);margin-bottom:6px\">" + escapeHtml(d.provider_name) + "</div>" +
       rowsHtml + nwHtml + linkHtml;
   };
 
@@ -180,14 +180,14 @@ if (data.length) {
         // Pareto frontier dots (highlighted).
         ...(paretoFrontier.length >= 2 ? [Plot.dot(paretoFrontier, {
           x: xMetric.field, y: yMetric.field,
-          fill: "#f0b429", stroke: "#0c1018", strokeWidth: 1.5,
+          fill: "#f0b429", stroke: "var(--bg)", strokeWidth: 1.5,
           r: 5, opacity: 0.9,
         })] : []),
         Plot.text(plotData, {
           x: xMetric.field, y: yMetric.field,
           text: (d) => shortName(d.name),
           fontSize: 9.5, dx: 12, dy: -8, textAnchor: "start",
-          fill: "#e6edf3", fillOpacity: 0.78, fontWeight: 500,
+          fill: "var(--text)", fillOpacity: 0.78, fontWeight: 500,
           pointerEvents: "none",
         }),
       ],

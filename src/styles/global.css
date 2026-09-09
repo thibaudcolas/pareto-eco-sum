@@ -4,6 +4,18 @@
     --agentic: #2dd4bf; --coding: #60a5fa; --intel: #c084fc;
     --border: #243044;
   }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f7fa; --surface: #ffffff; --surface-2: #eef1f6;
+    --text: #1a2233; --muted: #5a6678; --accent: #3565d9;
+    --agentic: #0d9488; --coding: #2563eb; --intel: #9333ea;
+    --border: #d8dee9;
+  }
+  .tooltip-popup {
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  }
+}
   * { box-sizing: border-box; }
   body {
     background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system,
