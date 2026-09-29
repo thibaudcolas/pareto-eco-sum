@@ -36,7 +36,35 @@
   }
   #scatter-plot { width: 100%; overflow: visible; }
   #scatter-plot svg { width: 100%; height: auto; font-family: inherit; }
+  /* Wagtail page: fixed 1024px canvas, matching the original scatter width. */
+  #wagtail-scatter-plot { width: 100%; overflow-x: auto; }
+  #wagtail-scatter-plot svg { font-family: inherit; max-width: none; }
   .plot-note { color: var(--muted); font-size: 0.8rem; margin-top: 0.6rem; }
+  /* Table view of the same data as the scatter, on the Wagtail page. */
+  .data-table-wrap { margin-top: 1.2rem; overflow-x: auto; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 0.8rem;
+    font-variant-numeric: tabular-nums; }
+  .data-table caption { color: var(--muted); font-size: 0.8rem; text-align: left;
+    padding-bottom: 0.5rem; }
+  .data-table th, .data-table td { padding: 0.35rem 0.6rem; text-align: right;
+    border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .data-table th:first-child, .data-table td:first-child { text-align: left; }
+  .data-table thead th { color: var(--muted); font-weight: 600;
+    border-bottom: 2px solid var(--border); }
+  .data-table tbody tr:hover { background: var(--surface-2); }
+  .data-table .cell-dot { display: inline-block; width: 0.6em; height: 0.6em;
+    border-radius: 50%; margin-right: 0.5em; vertical-align: baseline; }
+  .data-table .cell-na { color: var(--muted); }
+  /* Sortable table headers. */
+  .data-table .sort-btn { all: unset; cursor: pointer; width: 100%; display: flex;
+    align-items: center; justify-content: flex-end; gap: 0.25rem; }
+  .data-table th:first-child .sort-btn { justify-content: flex-start; }
+  .data-table .sort-btn:hover { color: var(--text); }
+  .data-table .sort-btn:focus-visible { outline: 2px solid var(--accent, currentColor);
+    outline-offset: 2px; border-radius: 2px; }
+  .data-table .sort-btn.is-active { color: var(--text); }
+  .data-table .sort-ind { font-size: 0.65em; opacity: 0; }
+  .data-table .sort-btn.is-active .sort-ind { opacity: 1; }
   /* Custom provider legend for the scatter plot. */
   .provider-legend {
     display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin: 0.8rem 0 1.2rem; font-size: 0.85rem;
@@ -172,3 +200,4 @@
   #scatter-plot svg .plot .axis title { fill: var(--muted); }
   #scatter-plot svg .plot .tip { fill: var(--surface-2); stroke: var(--border); }
   #scatter-plot svg .plot .tip text { fill: var(--text); font-size: 0.8rem; }
+

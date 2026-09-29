@@ -144,8 +144,12 @@ For Neuralwatt, matching is by display name: exact match first, then "AA name st
 - `src/layouts/BaseLayout.astro` — head, header, footer
 - `src/pages/index.astro` — the whole page: legend, scatter controls, plot
   mounts, statically rendered model + provider sections
+- `src/pages/wagtail.astro` — separate front-end scoring report (own page, not
+  linked from the index): provider-family legend and the WAGTAIL scatter
 - `src/scripts/scatter.js` — main comparison scatter (X/Y metric radios,
   location / KV-cache / provider-type filters, Pareto frontier, tooltips)
+- `src/scripts/wagtail-scatter.js` — Wagtail scatter (Y: accuracy %; X radio
+  swaps energy / cost / tokens / speed, Pareto frontier, tooltips)
 - `src/scripts/nw-scatter.js` — Neuralwatt energy-vs-cost scatter with
   proportional calibration line and variant styling
 - `src/scripts/provider-filters.js` — provider card filter chips

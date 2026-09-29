@@ -65,6 +65,41 @@ same commit. Do not move data analysis to the front-end: all computation (blende
 formulas, energy calibration, energy estimation, provider typing, colors, relative-date labels)
 stays in `fetch_models.py`. These files are committed; re-export after data refreshes.
 
+### Hand-maintained data
+
+`src/data/wagtail-evals-scores.csv` is **not** produced by `fetch_models.py` — it backs the
+separate front-end scoring page (`src/pages/wagtail.astro` + `src/scripts/wagtail-scatter.js`) and is
+replaced wholesale when a new benchmark run is scored. One row per model, one column per metric;
+the loader (`src/scripts/load-wagtail-data.js`) parses it and derives:
+
+- `name` and `model_id`; the `model_id` prefix maps to an inference provider
+  (`provider_id` / `provider_name`) — TensorX and Neuralwatt are hosting vendors, not families
+- `family` / `family_id` from the model name; `family_id` is keyed to the shared palette
+  (`src/data/colors.json`) and must match a key in `wagtail-scatter.js`'s `FAMILY_COLORS` or the
+  dot falls back to the default blue
+- `accuracy_successful` (development passes) / `accuracy_total` (development tasks) plus the
+  derived `accuracy_pct` (the Y axis)
+- `speed_seconds` + preformatted `speed_label` (`m:ss`), plus the totals for all tasks
+- `tokens` / `tokens_total`, `cost_usd` / `cost_usd_total`
+- `energy_wh` / `energy_wh_total` (`null` when the model was not energy-metered, shown as `—`)
+
+Energy is only populated for the metered models (7 of the current run), so the energy X axis plots
+a subset while cost / tokens / speed cover every row. Energy is intentionally **not** extrapolated
+from cost: provider, architecture and quantization variance make a cost-to-energy interpolation
+too noisy to be useful. Unmetered models simply do not appear on the energy axis.
+
+Display rules, applied consistently to the scatter ticks, the tooltips and the table beneath the
+chart: **cost to the cent** (`$0.09`) and **energy to a tenth of a Wh** (`14.9 Wh`). Values are
+stored at full precision in the CSV and rounded only for display. `name` carries no
+`(Neuralwatt)` / `(TensorX)` suffix — the hosting vendor is provenance, not identity; the
+`provider_name` column and the row's color dot convey the family.
+
+`src/pages/wagtail.astro` renders a table of the same rows under the chart. Both the chart and the
+table parse the same CSV through the shared loader, so they cannot drift from each other, and the
+table lists every row including models with no energy (shown as `—`) rather than only the plotted
+subset. A "Values" toggle above the plot switches both between median-per-task and
+total-for-all-tasks numbers.
+
 ### Cached data
 
 All cached API responses live in `data/cache/` with 24h TTL. If you need fresh data, use `--force-refresh`. The cache files:

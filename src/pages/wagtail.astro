@@ -1,0 +1,208 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import csvRaw from "../data/wagtail-evals-scores.csv?raw";
+import { parseWagtailCsv, csvRowsToModels } from "../scripts/load-wagtail-data.js";
+
+// Source of truth: the full-run CSV, parsed at build time.
+const wagtail = csvRowsToModels(parseWagtailCsv(csvRaw));
+
+// Family legend, in first-appearance order. Colors mirror the main view
+// (src/data/colors.json) keyed by that page's provider ids — TensorX and
+// Neuralwatt are inference providers, so dots are colored by model family.
+const FAMILY_COLORS = {
+  openai: "#10a37f",
+  anthropic: "#d97757",
+  google: "#4285f4",
+  meta: "#0866ff",
+  alibaba: "#615ced",
+  deepseek: "#4d6bfe",
+  zhipuai: "#3155d6",
+  moonshotai: "#9b6dff",
+  neuralwatt: "#5b8def",
+  tensorx: "#ec4899",
+};
+const FALLBACK_COLOR = "#5b8def";
+
+const familyLegend = [];
+for (const m of wagtail) {
+  if (!familyLegend.some((f) => f.id === m.family_id)) {
+    familyLegend.push({
+      id: m.family_id,
+      name: m.family,
+      color: FAMILY_COLORS[m.family_id] || FALLBACK_COLOR,
+      letter: m.family.charAt(0),
+      domain: m.family_domain,
+    });
+  }
+}
+
+// Same logo chain as the main page: models.dev SVG by id, Google favicon by
+// domain as fallback, letter as last resort.
+const MODELSDEV_LOGOS_BASE = "https://models.dev/logos";
+const GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain=";
+
+const energyCount = wagtail.filter((m) => m.energy_wh != null).length;
+const topAccuracy = wagtail.reduce((a, b) => (b.accuracy_pct > a.accuracy_pct ? b : a), wagtail[0]);
+
+// Table view: same rows as the scatter, sorted by accuracy then energy, with
+// the measured-energy models first so the subset reads as the top group.
+const fmtWh = (v) => v.toFixed(1);
+const fmtUsd = (v) => "$" + v.toFixed(2);
+// Totals are long (up to ~6h of task time), so format as h:mm:ss.
+const fmtTotalSeconds = (v) => {
+  if (v == null) return "—";
+  const total = Math.round(v);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0
+    ? h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0")
+    : m + ":" + String(s).padStart(2, "0");
+};
+const tableRows = wagtail
+  .slice()
+  .sort((a, b) => b.accuracy_pct - a.accuracy_pct
+    || (a.energy_wh == null) - (b.energy_wh == null)
+    || (a.energy_wh ?? Infinity) - (b.energy_wh ?? Infinity));
+const tableMissesEnergy = wagtail.length - energyCount;
+const tableTopScore = topAccuracy.accuracy_pct;
+const tableRowsWithColor = tableRows.map((m) => ({
+  ...m,
+  color: FAMILY_COLORS[m.family_id] || FALLBACK_COLOR,
+}));
+---
+
+<BaseLayout title="Wagtail front-end scoring — accuracy vs energy, cost, tokens & speed">
+  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Front-end scoring — capability vs cost, energy, tokens & speed — {wagtail.length} models</h2>
+  <div class="scatter-wrap">
+    <div class="provider-legend">
+      {familyLegend.map((fam) => (
+        <span class="legend-item" data-provider={fam.id}>
+          <span class="swatch" style={`background:${fam.color}`} />
+          <span class="legend-logo" style={`background:${fam.color}20`}>
+            {fam.id ? (
+              <>
+                <img src={`${MODELSDEV_LOGOS_BASE}/${fam.id}.svg`} alt={fam.name} title={fam.name}
+                  loading="lazy"
+                  onerror={fam.domain
+                    ? `this.onerror=null;this.src='${GOOGLE_FAVICONS_URL}${fam.domain}';`
+                    : `this.style.display='none';this.nextElementSibling.style.display='inline-block';`} />
+                <span class="logo-letter" style="display:none">{fam.letter}</span>
+              </>
+            ) : (
+              <span class="logo-letter">{fam.letter}</span>
+            )}
+          </span>
+          <span class="legend-name">{fam.name}</span>
+        </span>
+      ))}
+    </div>
+    <div class="scatter-controls">
+      <span class="controls-label">X axis</span>
+      <label class="metric-radio x-metric" data-xmetric="energy_wh" data-active="true">
+        <input type="radio" name="wxmetric" value="energy_wh" checked />
+        <span>Energy / task</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="cost_usd">
+        <input type="radio" name="wxmetric" value="cost_usd" />
+        <span>Cost / task</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="tokens">
+        <input type="radio" name="wxmetric" value="tokens" />
+        <span>Output tokens</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="speed_seconds">
+        <input type="radio" name="wxmetric" value="speed_seconds" />
+        <span>Speed</span>
+      </label>
+    </div>
+    <div class="provider-legend">
+      <span class="legend-item">
+        <span class="swatch swatch-measured"></span>
+        <span class="legend-name">Energy measured — {energyCount} of {wagtail.length} models</span>
+      </span>
+    </div>
+    <div class="scatter-controls mode-toggle">
+      <span class="controls-label">Values</span>
+      <label class="metric-radio" data-mode="median" data-active="true">
+        <input type="radio" name="wmode" value="median" checked />
+        <span>Median per task</span>
+      </label>
+      <label class="metric-radio" data-mode="total">
+        <input type="radio" name="wmode" value="total" />
+        <span>Total for all {topAccuracy.accuracy_total} tasks</span>
+      </label>
+    </div>
+    <div id="wagtail-scatter-plot"></div>
+    <p class="plot-note">Y axis is accuracy as a percentage of the 20 tasks per model. The Values toggle
+      switches between the <strong>median per task</strong> and the <strong>total for all tasks</strong>:
+      energy use (Wh), cost (USD), output tokens, or task time (seconds).
+      Energy is only reported for {energyCount} of {wagtail.length} models, so the default energy view plots those
+      {energyCount} points only; switch the X axis to compare all {wagtail.length}. Highest accuracy:
+      <strong>{topAccuracy.name}</strong> at {topAccuracy.accuracy_successful}/{topAccuracy.accuracy_total}
+      ({topAccuracy.accuracy_pct}%) — GPT-6 Sol and Claude Opus 5.5 tie at 19/20. Dashed amber line: Pareto
+      frontier on the selected X axis (best accuracy at the lowest energy / cost / token count / time).
+      Hover any dot for the full column values.</p>
+
+    <div class="data-table-wrap">
+      <table class="data-table" id="wagtail-table">
+        <caption>Same data as the chart, all {wagtail.length} models. Values are the median per task by
+          default; switch to totals above. Sorted by accuracy by default; click any column header to
+          re-sort. Energy is unmeasured for {tableMissesEnergy} models and shown as “—”; those rows sort
+          last.</caption>
+        <thead>
+          <tr>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="name" aria-label="Sort by model name">Model<span class="sort-ind" aria-hidden="true">▼</span></button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="provider_name" aria-label="Sort by provider">Provider<span class="sort-ind" aria-hidden="true"></span></button></th>
+            <th scope="col"><button type="button" class="sort-btn is-active" data-sort-key="accuracy_pct" dir="desc" aria-label="Sort by accuracy">Accuracy<span class="sort-ind" aria-hidden="true">▼</span></button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="energy_wh" aria-label="Sort by energy in watt-hours">Energy (Wh)<span class="sort-ind" aria-hidden="true"></span></button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="cost_usd" aria-label="Sort by cost">Cost<span class="sort-ind" aria-hidden="true"></span></button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="tokens" aria-label="Sort by output tokens">Output tokens<span class="sort-ind" aria-hidden="true"></span></button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="speed_seconds" aria-label="Sort by speed in seconds">Speed<span class="sort-ind" aria-hidden="true"></span></button></th>
+          </tr>
+        </thead>
+        <tbody>
+          {tableRowsWithColor.map((m) => (
+            <tr>
+              <td data-sort-value={m.name}>
+                <span class="cell-dot" style={`background:${m.color}`} aria-hidden="true" />
+                {m.name}
+              </td>
+              <td data-sort-value={m.provider_name}>{m.provider_name}</td>
+              <td data-sort-value={m.accuracy_pct}>
+                <strong>{m.accuracy_pct}%</strong>
+                <span class="cell-na"> ({m.accuracy_successful}/{m.accuracy_total})</span>
+              </td>
+              <td class={m.energy_wh == null ? "cell-na" : ""} data-field="energy_wh"
+                data-median={m.energy_wh == null ? "" : m.energy_wh.toFixed(1)}
+                data-total={m.energy_wh_total == null ? "" : m.energy_wh_total.toFixed(1)}>
+                {m.energy_wh == null ? "—" : fmtWh(m.energy_wh)}
+              </td>
+              <td data-field="cost_usd"
+                data-median={"$" + m.cost_usd.toFixed(2)}
+                data-total={"$" + m.cost_usd_total.toFixed(2)}>
+                {fmtUsd(m.cost_usd)}
+              </td>
+              <td data-field="tokens"
+                data-median={m.tokens.toLocaleString()}
+                data-total={m.tokens_total.toLocaleString()}>
+                {m.tokens.toLocaleString()}
+              </td>
+              <td data-field="speed_seconds"
+                data-median={m.speed_label}
+                data-total={fmtTotalSeconds(m.speed_seconds_total)}>
+                {m.speed_label}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    import "../scripts/wagtail-scatter.js";
+    import "../scripts/table-sort.js";
+    import "../scripts/table-mode.js";
+  </script>
+</BaseLayout>
