@@ -192,6 +192,21 @@ function render(xMetricKey) {
   // cover every model.
   const plotData = data.filter((d) => d[Y_FIELD] != null && d[xField] != null);
 
+  // Label jitter tiers. Plot's dx/dy are scalar mark options (a function is
+  // silently dropped and no transform is emitted), so per-model offsets are
+  // applied by drawing one text mark per tier with its own constant dx/dy.
+  // Assignment is a deterministic hash of the model name, so labels stay put
+  // across re-renders (metric / mode switches), and the dx and dy tiers are
+  // hashed separately so the two offsets don't move in lockstep.
+  const labelTiers = new Map();
+  for (const d of plotData) {
+    const dx = 14 + (hash(d.name + "x") % 5) * 3;
+    const dy = -26 - (hash(d.name + "y") % 5) * 5;
+    const key = dx + "|" + dy;
+    if (!labelTiers.has(key)) labelTiers.set(key, { dx, dy, rows: [] });
+    labelTiers.get(key).rows.push(d);
+  }
+
   // Pareto frontier on this axis pair: cheaper (or fewer tokens / faster) AND
   // at least as accurate. Sort by X ascending, keep strictly-better Y.
   const paretoFrontier = plotData
@@ -273,23 +288,25 @@ function render(xMetricKey) {
             }),
           ]
         : []),
-      Plot.text(plotData, {
-        x: xField,
-        y: Y_FIELD,
-        text: (d) => shortName(d.name),
-        // Bigger labels, raised further above their dot. Jitter the offset a
-        // bit so models sharing the same accuracy (Y) don't pile their labels
-        // on top of each other; deterministic per model name so re-renders
-        // (metric / mode switches) keep each label in place.
-        fontSize: 11.5,
-        textAnchor: "start",
-        dx: (d) => 10 + (hash(d.name) % 5) * 2,
-        dy: (d) => -14 - (hash(d.name) % 3) * 4,
-        fill: "var(--text)",
-        fillOpacity: 0.85,
-        fontWeight: 500,
-        pointerEvents: "none",
-      }),
+      // Labels: one text mark per jitter tier so each gets its own constant
+      // dx/dy (Plot ignores per-datum dx/dy). Bigger than the other scatters'
+      // 9.5px, always top-right of the dot, with the vertical lift varying by
+      // tier so models sharing the same accuracy don't stack their labels.
+      ...[...labelTiers.values()].map((tier) =>
+        Plot.text(tier.rows, {
+          x: xField,
+          y: Y_FIELD,
+          text: (d) => shortName(d.name),
+          fontSize: 14,
+          textAnchor: "start",
+          dx: tier.dx,
+          dy: tier.dy,
+          fill: "var(--text)",
+          fillOpacity: 0.85,
+          fontWeight: 500,
+          pointerEvents: "none",
+        })
+      ),
     ],
   });
 
