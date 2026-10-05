@@ -9,11 +9,13 @@
 
   function applyMode(mode) {
     const attr = mode === "total" ? "data-total" : "data-median";
+    const tintAttr = mode === "total" ? "data-tint-total" : "data-tint-median";
     cells.forEach((cell) => {
       const value = cell.getAttribute(attr) ?? "";
       cell.textContent = value === "" ? "—" : value;
       cell.classList.toggle("cell-na", value === "");
       cell.dataset.sortValue = value;
+      cell.style.backgroundColor = cell.getAttribute(tintAttr) || "";
     });
   }
 
@@ -28,4 +30,7 @@
         });
     });
   });
+
+  // Paint the default (median) tints on first load.
+  applyMode("median");
 })();

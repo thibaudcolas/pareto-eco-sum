@@ -114,7 +114,7 @@ PROVIDER_COLORS: dict[str, str] = {
     "meta": "#0866ff",
     "xai": "#e2b85a",
     "nvidia": "#76b900",
-    "zhipuai": "#3155d6",
+    "zhipuai": "#0ea5e9",
     "xiaomi": "#ff7e3f",
     "moonshotai": "#9b6dff",
     "minimax": "#ff4d4f",

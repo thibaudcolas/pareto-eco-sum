@@ -3,6 +3,7 @@
 // (src/data/wagtail-evals-scores.csv), parsed with the shared loader,
 // keeping the provider-colored-dot + tooltip convention of the main page.
 import csvRaw from "../data/wagtail-evals-scores.csv?raw";
+import colors from "../data/colors.json";
 import { parseWagtailCsv, csvRowsToModels } from "./load-wagtail-data.js";
 import * as Plot from "@observablehq/plot";
 import {
@@ -13,36 +14,13 @@ import {
   bindCircleTooltips,
 } from "./plot-common.js";
 
-// Family colors, keyed to the main view palette (src/data/colors.json).
+// Family colors reuse the shared provider palette (src/data/colors.json).
 // TensorX and Neuralwatt are inference providers, not model families, so dots
 // are colored by model family (GPT-6, Claude, Qwen, ...) instead.
-const FAMILY_COLORS = {
-  openai: "#10a37f",
-  anthropic: "#d97757",
-  google: "#4285f4",
-  meta: "#0866ff",
-  alibaba: "#615ced",
-  deepseek: "#4d6bfe",
-  zhipuai: "#3155d6",
-  moonshotai: "#9b6dff",
-  neuralwatt: "#5b8def",
-  tensorx: "#ec4899",
-};
-
 const data = csvRowsToModels(parseWagtailCsv(csvRaw));
 
 const FALLBACK_COLOR = "#5b8def";
-const colorFor = (d) => FAMILY_COLORS[d.family_id] || FALLBACK_COLOR;
-
-// Small deterministic string hash for label jitter: same input → same offset,
-// so a label doesn't jump when the chart re-renders.
-const hash = (str) => {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h * 31 + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-};
+const colorFor = (d) => colors[d.family_id] || FALLBACK_COLOR;
 
 // Shared value formatters: cost to the cent, energy to a tenth of a Wh.
 const fmtWh = (v) => v.toFixed(1) + " Wh";
@@ -58,6 +36,10 @@ const X_METRICS = {
       mode === "total"
         ? "Energy use — total for all 20 tasks (Wh)"
         : "Energy use — median per task (Wh)",
+    title: (mode) =>
+      mode === "total"
+        ? "Accuracy vs. energy — each model's score against the energy used to run all 20 tasks."
+        : "Accuracy vs. energy — each model's score against the energy it uses for a typical task.",
     fmt: fmtWh,
   },
   cost_usd: {
@@ -67,6 +49,10 @@ const X_METRICS = {
       mode === "total"
         ? "Cost — total for all 20 tasks (USD)"
         : "Cost — median per task (USD)",
+    title: (mode) =>
+      mode === "total"
+        ? "Accuracy vs. cost — each model's score against the cost of running all 20 tasks."
+        : "Accuracy vs. cost — each model's score against what a typical task costs.",
     fmt: fmtUsd,
   },
   tokens: {
@@ -76,6 +62,10 @@ const X_METRICS = {
       mode === "total"
         ? "Output tokens — total for all 20 tasks"
         : "Output tokens — median per task",
+    title: (mode) =>
+      mode === "total"
+        ? "Accuracy vs. output tokens — each model's score against the tokens it writes across all 20 tasks."
+        : "Accuracy vs. output tokens — each model's score against the tokens it writes for a typical task.",
     fmt: (d) => Math.round(d).toLocaleString(),
   },
   speed_seconds: {
@@ -85,6 +75,10 @@ const X_METRICS = {
       mode === "total"
         ? "Speed — total task time for all 20 tasks (seconds)"
         : "Speed — median task time (seconds)",
+    title: (mode) =>
+      mode === "total"
+        ? "Accuracy vs. speed — each model's score against the time to run all 20 tasks."
+        : "Accuracy vs. speed — each model's score against how long a typical task takes.",
     fmt: (d) => d + "s",
   },
 };
@@ -192,20 +186,11 @@ function render(xMetricKey) {
   // cover every model.
   const plotData = data.filter((d) => d[Y_FIELD] != null && d[xField] != null);
 
-  // Label jitter tiers. Plot's dx/dy are scalar mark options (a function is
-  // silently dropped and no transform is emitted), so per-model offsets are
-  // applied by drawing one text mark per tier with its own constant dx/dy.
-  // Assignment is a deterministic hash of the model name, so labels stay put
-  // across re-renders (metric / mode switches), and the dx and dy tiers are
-  // hashed separately so the two offsets don't move in lockstep.
-  const labelTiers = new Map();
-  for (const d of plotData) {
-    const dx = 14 + (hash(d.name + "x") % 5) * 3;
-    const dy = -26 - (hash(d.name + "y") % 5) * 5;
-    const key = dx + "|" + dy;
-    if (!labelTiers.has(key)) labelTiers.set(key, { dx, dy, rows: [] });
-    labelTiers.get(key).rows.push(d);
-  }
+  // Labels: Plot's dx/dy are scalar mark options (a function is silently
+  // dropped and no transform is emitted), so all labels share one constant
+  // offset via a single text mark. Every label sits at the same top-right
+  // position relative to its dot: right of the dot's radius, above it.
+  const labelOffset = { dx: 11, dy: -11 };
 
   // Pareto frontier on this axis pair: cheaper (or fewer tokens / faster) AND
   // at least as accurate. Sort by X ascending, keep strictly-better Y.
@@ -288,25 +273,20 @@ function render(xMetricKey) {
             }),
           ]
         : []),
-      // Labels: one text mark per jitter tier so each gets its own constant
-      // dx/dy (Plot ignores per-datum dx/dy). Bigger than the other scatters'
-      // 9.5px, always top-right of the dot, with the vertical lift varying by
-      // tier so models sharing the same accuracy don't stack their labels.
-      ...[...labelTiers.values()].map((tier) =>
-        Plot.text(tier.rows, {
-          x: xField,
-          y: Y_FIELD,
-          text: (d) => shortName(d.name),
-          fontSize: 14,
-          textAnchor: "start",
-          dx: tier.dx,
-          dy: tier.dy,
-          fill: "var(--text)",
-          fillOpacity: 0.85,
-          fontWeight: 500,
-          pointerEvents: "none",
-        })
-      ),
+      // Labels: always top-right of the dot, same offset for every model.
+      Plot.text(plotData, {
+        x: xField,
+        y: Y_FIELD,
+        text: (d) => shortName(d.name),
+        fontSize: 14,
+        textAnchor: "start",
+        dx: labelOffset.dx,
+        dy: labelOffset.dy,
+        fill: "var(--text)",
+        fillOpacity: 0.85,
+        fontWeight: 500,
+        pointerEvents: "none",
+      }),
     ],
   });
 
@@ -324,12 +304,21 @@ function render(xMetricKey) {
     tipHtml,
   );
 
-  // Count label reflects what is actually on screen for this axis.
-  const countEl = document.getElementById("wagtail-point-count");
-  if (countEl) countEl.textContent = String(plotData.length);
+  // Plain-language one-liner for the current metric + aggregation, plus how
+  // many models are actually plotted on this axis (energy is a subset).
+  const titleEl = document.getElementById("wagtail-chart-title");
+  if (titleEl) {
+    titleEl.textContent =
+      xMetric.title(currentMode) +
+      " " +
+      plotData.length +
+      " of " +
+      data.length +
+      " models shown.";
+  }
 }
 
-let currentX = "energy_wh";
+let currentX = "cost_usd";
 render(currentX);
 modeListeners.push(() => render(currentX));
 
