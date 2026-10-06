@@ -144,14 +144,14 @@ For Neuralwatt, matching is by display name: exact match first, then "AA name st
 - `src/layouts/BaseLayout.astro` — head, header, footer
 - `src/pages/index.astro` — the whole page: legend, scatter controls, plot
   mounts, statically rendered model + provider sections
-- `src/pages/wagtail.astro` — “Agents on WAgtail benchmark” report (own page,
-  not linked from the index): wagtail/ai-evals scores, provider-family legend,
-  scatter, and the colour-coded results table
+- `src/pages/wagtail.astro` — Wagtail AI evaluations report (own page, not linked
+  from the index): accuracy, energy, carbon, cost, output, and runtime from
+  `src/data/wagtail-evals-scores.csv`, with a scatter plot and sortable results table
 - `src/scripts/scatter.js` — main comparison scatter (X/Y metric radios,
   location / KV-cache / provider-type filters, Pareto frontier, tooltips)
 - `src/scripts/wagtail-scatter.js` — Wagtail scatter (Y: accuracy %; X radio
-  swaps energy / cost / tokens / speed, Pareto frontier, tooltips, dynamic
-  chart one-liner)
+  swaps energy / carbon / cost / tokens / speed, Pareto frontier, tooltips,
+  dynamic chart one-liner)
 - `src/scripts/table-mode.js` — Wagtail table median/total toggle; repaints
   the red–green cell tints for the active view
 - `src/scripts/nw-scatter.js` — Neuralwatt energy-vs-cost scatter with

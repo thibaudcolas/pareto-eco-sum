@@ -6,11 +6,15 @@ interface Props {
   title: string;
   heading?: string;
   description?: string;
+  metaDescription?: string;
+  showBuildAttribution?: boolean;
 }
 const {
   title,
   heading = "Open-weight LLM landscape",
   description = "Comparing benchmark scores, pricing, and energy use across open-weight language models and their providers.",
+  metaDescription = "Comparing benchmark scores, pricing, and energy use across open-weight language models and their providers.",
+  showBuildAttribution = true,
 } = Astro.props;
 ---
 
@@ -22,7 +26,7 @@ const {
     <title>{title}</title>
     <meta
       name="description"
-      content="Comparing benchmark scores, pricing, and energy use across open-weight language models and their providers."
+      content={metaDescription}
     />
   </head>
   <body>
@@ -30,13 +34,17 @@ const {
       <header>
         <h1 id="top">{heading}</h1>
         <p set:html={description} />
-        <p>Built with <a href="https://artificialanalysis.ai/models/glm-5-2" target="_blank" rel="noopener">GLM-5.2</a> on
-          <a href="https://neuralwatt.com" target="_blank" rel="noopener">Neuralwatt</a> ·
-          <span title="Total energy and carbon cost of building this report">1.60 kWh · 193.7 g CO₂</span> ·
+        <p>
+          {showBuildAttribution && <>
+            Built with <a href="https://artificialanalysis.ai/models/glm-5-2" target="_blank" rel="noopener">GLM-5.2</a> on
+            <a href="https://neuralwatt.com" target="_blank" rel="noopener">Neuralwatt</a> ·
+            <span title="Total energy and carbon cost of building this report">1.60 kWh · 193.7 g CO₂</span> ·
+          </>}
           Data: <slot name="data-sources"><a href="https://artificialanalysis.ai/api/v2/language/models/free">Artificial Analysis</a> ·
           <a href="https://models.dev/catalog.json">models.dev</a> ·
           <a href="https://portal.neuralwatt.com/energy-pricing">Neuralwatt</a> ·
-          <a href="https://openrouter.ai/api/v1/providers">OpenRouter</a></slot> · generated {meta.generated_at}</p>
+          <a href="https://openrouter.ai/api/v1/providers">OpenRouter</a></slot> · generated {meta.generated_at}
+        </p>
       </header>
 
       <slot />

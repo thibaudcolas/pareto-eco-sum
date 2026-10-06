@@ -35,6 +35,10 @@ const MODELSDEV_LOGOS_BASE = "https://models.dev/logos";
 const GOOGLE_FAVICONS_URL = "https://www.google.com/s2/favicons?sz=64&domain=";
 
 const energyCount = wagtail.filter((m) => m.energy_wh != null).length;
+const carbonCount = wagtail.filter((m) => m.carbon_g_co2eq != null).length;
+const partialCarbonCount = wagtail.filter(
+  (m) => m.carbon_coverage === "partial",
+).length;
 const topAccuracy = wagtail.reduce((a, b) => (b.accuracy_pct > a.accuracy_pct ? b : a), wagtail[0]);
 
 // Table view: same rows as the scatter, sorted by accuracy then energy, with
@@ -57,7 +61,6 @@ const tableRows = wagtail
   .sort((a, b) => b.accuracy_pct - a.accuracy_pct
     || (a.energy_wh == null) - (b.energy_wh == null)
     || (a.energy_wh ?? Infinity) - (b.energy_wh ?? Infinity));
-const tableMissesEnergy = wagtail.length - energyCount;
 
 // Red–green tinting for the table's numeric cells. Accuracy is centred on 50%
 // (higher is better); the other metrics are centred on the median of the
@@ -91,6 +94,11 @@ function tint(v, { pivot, lo, hi, higherIsBetter }) {
 const TINT_FIELDS = {
   accuracy_pct: ["accuracy_pct", "accuracy_pct", { pivot: 50, higherIsBetter: true }],
   energy_wh: ["energy_wh", "energy_wh_total", { higherIsBetter: false }],
+  carbon_g_co2eq: [
+    "carbon_g_co2eq",
+    "carbon_g_co2eq_total",
+    { higherIsBetter: false },
+  ],
   cost_usd: ["cost_usd", "cost_usd_total", { higherIsBetter: false }],
   tokens: ["tokens", "tokens_total", { higherIsBetter: false }],
   speed_seconds: ["speed_seconds", "speed_seconds_total", { higherIsBetter: false }],
@@ -131,15 +139,17 @@ const tableRowsWithColor = tableRows.map((m) => ({
 ---
 
 <BaseLayout
-  title="Agents on WAgtail benchmark — accuracy vs energy, cost, tokens & speed"
-  heading="Agents on WAgtail benchmark"
-  description={`WAgtail development-task accuracy from the <a href="https://github.com/wagtail/ai-evals" target="_blank" rel="noopener">wagtail/ai-evals</a> suite, compared against energy use, cost, output tokens, and speed across ${wagtail.length} models.`}
+  title="Wagtail AI evaluations — accuracy, energy & carbon"
+  heading="Wagtail AI evaluations"
+  description={`How ${wagtail.length} AI models performed on the <a href="https://github.com/wagtail/ai-evals" target="_blank" rel="noopener">Wagtail development tasks</a>, alongside their energy use, carbon footprint, cost, output, and runtime.`}
+  metaDescription={`Accuracy, energy use, carbon footprint, cost, output, and runtime for ${wagtail.length} models on Wagtail development tasks.`}
+  showBuildAttribution={false}
 >
   <Fragment slot="data-sources">
     <a href="https://github.com/wagtail/ai-evals" target="_blank" rel="noopener">wagtail/ai-evals</a> ·
-    <a href="https://models.dev/catalog.json">models.dev</a>
+    Full run · 25 Sep 2026 · {topAccuracy.accuracy_total} tasks
   </Fragment>
-  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Results — accuracy vs. energy, cost, tokens, speed ({wagtail.length} models)</h2>
+  <h2 class="section" id="scatter"><a href="#scatter" class="anchor">§</a> Accuracy and resource use</h2>
   <div class="scatter-wrap">
     <div class="provider-legend">
       {familyLegend.map((fam) => (
@@ -171,7 +181,11 @@ const tableRowsWithColor = tableRows.map((m) => ({
       </label>
       <label class="metric-radio x-metric" data-xmetric="energy_wh">
         <input type="radio" name="wxmetric" value="energy_wh" />
-        <span>Energy ⚡</span>
+        <span>Energy</span>
+      </label>
+      <label class="metric-radio x-metric" data-xmetric="carbon_g_co2eq">
+        <input type="radio" name="wxmetric" value="carbon_g_co2eq" />
+        <span>Carbon footprint</span>
       </label>
       <label class="metric-radio x-metric" data-xmetric="tokens">
         <input type="radio" name="wxmetric" value="tokens" />
@@ -190,37 +204,26 @@ const tableRowsWithColor = tableRows.map((m) => ({
       </label>
       <label class="metric-radio" data-mode="total">
         <input type="radio" name="wmode" value="total" />
-        <span>Total for all {topAccuracy.accuracy_total} tasks</span>
+        <span>Total across {topAccuracy.accuracy_total} tasks</span>
       </label>
     </div>
     <p class="plot-title" id="wagtail-chart-title"></p>
     <div id="wagtail-scatter-plot"></div>
-    <p class="plot-note">Y axis: accuracy as a percentage of tasks completed. X axis: four metrics, can be switched between the <strong>median per task</strong> and the <strong>total for all tasks</strong>. Metrics:
-      energy use (Wh), cost (USD), output tokens, task time (seconds).
-      Energy is only reported for {energyCount} of {wagtail.length} models, so the energy view plots those
-      {energyCount} points only; switch the X axis to compare all {wagtail.length}. Dashed amber line: Pareto
-      frontier on the selected X axis (best accuracy at the lowest energy / cost / token count / time).
-      Hover any dot for the full column values.</p>
-    <ul class="metric-why">
-      <li><strong>Cost</strong> — what it costs to run a task; lower is cheaper.</li>
-      <li><strong>Energy ⚡</strong> — watt-hours consumed; lower is a lighter footprint.</li>
-      <li><strong>Output tokens</strong> — how much the model writes; lower is more concise.</li>
-      <li><strong>Speed</strong> — wall-clock time per task; lower is faster.</li>
-    </ul>
+    <p class="plot-note">
+      Each dot is a model. The vertical axis shows tasks passed; choose a horizontal metric and view its median per task or total across all tasks. Lower resource use and higher accuracy are better; the dashed line marks the Pareto frontier. Energy is reported for {energyCount} models and carbon for {carbonCount}; unreported values are omitted from those views. {partialCarbonCount > 0 && `Carbon coverage is partial for ${partialCarbonCount} models.`} Hover a dot for its values.
+    </p>
 
     <h3 class="data-table-title">Full results — all {wagtail.length} models</h3>
     <div class="data-table-wrap">
       <table class="data-table" id="wagtail-table">
-        <caption>Same data as the chart, all {wagtail.length} models. Values are the median per task by
-          default; switch to totals above. Sorted by accuracy by default; click any column header to
-          re-sort. Energy is unmeasured for {tableMissesEnergy} models and shown as “—”; those rows sort
-          last.</caption>
+        <caption>Values match the chart and start at the median per task; use the control above to show totals across {topAccuracy.accuracy_total} tasks. Carbon values are in grams of CO₂e. Blank cells mean no value was reported.</caption>
         <thead>
           <tr>
             <th scope="col"><button type="button" class="sort-btn" data-sort-key="name" aria-label="Sort by model name">Model<span class="sort-ind" aria-hidden="true">▼</span></button></th>
             <th scope="col"><button type="button" class="sort-btn" data-sort-key="provider_name" aria-label="Sort by provider">Provider<span class="sort-ind" aria-hidden="true"></span></button></th>
             <th scope="col"><button type="button" class="sort-btn is-active" data-sort-key="accuracy_pct" dir="desc" aria-label="Sort by accuracy">Accuracy<span class="sort-ind" aria-hidden="true">▼</span></button></th>
             <th scope="col"><button type="button" class="sort-btn" data-sort-key="energy_wh" aria-label="Sort by energy in watt-hours">Energy (Wh)<span class="sort-ind" aria-hidden="true"></span></button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort-key="carbon_g_co2eq" aria-label="Sort by carbon footprint in grams of CO2 equivalent">Carbon (g CO₂e)<span class="sort-ind" aria-hidden="true"></span></button></th>
             <th scope="col"><button type="button" class="sort-btn" data-sort-key="cost_usd" aria-label="Sort by cost">Cost<span class="sort-ind" aria-hidden="true"></span></button></th>
             <th scope="col"><button type="button" class="sort-btn" data-sort-key="tokens" aria-label="Sort by output tokens">Output tokens<span class="sort-ind" aria-hidden="true"></span></button></th>
             <th scope="col"><button type="button" class="sort-btn" data-sort-key="speed_seconds" aria-label="Sort by speed in seconds">Speed<span class="sort-ind" aria-hidden="true"></span></button></th>
@@ -245,6 +248,17 @@ const tableRowsWithColor = tableRows.map((m) => ({
                 data-median={m.energy_wh == null ? "" : m.energy_wh.toFixed(1)}
                 data-total={m.energy_wh_total == null ? "" : m.energy_wh_total.toFixed(1)}>
                 {m.energy_wh == null ? "—" : fmtWh(m.energy_wh)}
+              </td>
+              <td class={m.carbon_g_co2eq == null ? "cell-na" : ""} data-field="carbon_g_co2eq"
+                data-sort-value={m.carbon_g_co2eq ?? ""}
+                title={m.carbon_coverage
+                  ? `Carbon coverage: ${m.carbon_coverage} (${m.carbon_requests_measured ?? 0}/${m.carbon_request_attempts ?? 0} requests)`
+                  : undefined}
+                data-tint-median={m.tints.carbon_g_co2eq.median}
+                data-tint-total={m.tints.carbon_g_co2eq.total}
+                data-median={m.carbon_g_co2eq == null ? "" : m.carbon_g_co2eq.toFixed(3)}
+                data-total={m.carbon_g_co2eq_total == null ? "" : m.carbon_g_co2eq_total.toFixed(3)}>
+                {m.carbon_g_co2eq == null ? "—" : m.carbon_g_co2eq.toFixed(3)}
               </td>
               <td data-field="cost_usd"
                 data-tint-median={m.tints.cost_usd.median}

@@ -1,7 +1,5 @@
-// Wagtail front-end scoring scatter: Top 10 Accuracy/success vs
-// energy / cost / tokens / speed. Dataset comes from the full-run CSV
-// (src/data/wagtail-evals-scores.csv), parsed with the shared loader,
-// keeping the provider-colored-dot + tooltip convention of the main page.
+// Wagtail evaluation scatter: accuracy against energy, carbon, cost, output,
+// and runtime. The page and chart share the Wagtail CSV in src/data/.
 import csvRaw from "../data/wagtail-evals-scores.csv?raw";
 import colors from "../data/colors.json";
 import { parseWagtailCsv, csvRowsToModels } from "./load-wagtail-data.js";
@@ -24,6 +22,7 @@ const colorFor = (d) => colors[d.family_id] || FALLBACK_COLOR;
 
 // Shared value formatters: cost to the cent, energy to a tenth of a Wh.
 const fmtWh = (v) => v.toFixed(1) + " Wh";
+const fmtCarbon = (v) => v.toFixed(3) + " g CO₂e";
 const fmtUsd = (v) => "$" + v.toFixed(2);
 
 // X metrics, swappable. Keys match the radio input values. Each metric maps
@@ -41,6 +40,20 @@ const X_METRICS = {
         ? "Accuracy vs. energy — each model's score against the energy used to run all 20 tasks."
         : "Accuracy vs. energy — each model's score against the energy it uses for a typical task.",
     fmt: fmtWh,
+  },
+  carbon_g_co2eq: {
+    medianField: "carbon_g_co2eq",
+    totalField: "carbon_g_co2eq_total",
+    label: (mode) =>
+      mode === "total"
+        ? "Carbon footprint — total across all 20 tasks (g CO₂e)"
+        : "Carbon footprint — median per task (g CO₂e)",
+    title: (mode) =>
+      mode === "total"
+        ? "Accuracy vs. carbon footprint — carbon emissions across all 20 tasks."
+        : "Accuracy vs. carbon footprint — carbon emissions for a typical task.",
+    fmt: fmtCarbon,
+    tickFmt: (d) => Number(d.toPrecision(2)).toString(),
   },
   cost_usd: {
     medianField: "cost_usd",
@@ -152,6 +165,22 @@ const tipHtml = (d) => {
           ? "n/a"
           : fmtWh(d.energy_wh),
     ],
+    [
+      currentMode === "total" ? "Carbon footprint (total)" : "Carbon footprint (median)",
+      currentMode === "total"
+        ? d.carbon_g_co2eq_total == null
+          ? "n/a"
+          : fmtCarbon(d.carbon_g_co2eq_total)
+        : d.carbon_g_co2eq == null
+          ? "n/a"
+          : fmtCarbon(d.carbon_g_co2eq),
+    ],
+    [
+      "Carbon coverage",
+      d.carbon_coverage
+        ? `${d.carbon_coverage} (${d.carbon_requests_measured ?? 0}/${d.carbon_request_attempts ?? 0} requests)`
+        : "not reported",
+    ],
     ["X axis", xValue == null ? "n/a" : metric.fmt(xValue)],
     ["Provider", d.provider_name],
     ["Family", d.family],
@@ -223,7 +252,7 @@ function render(xMetricKey) {
     height: 560,
     x: {
       type: "linear",
-      tickFormat: xMetric.fmt,
+      tickFormat: xMetric.tickFmt || xMetric.fmt,
       label: xMetric.label(currentMode),
       labelAnchor: "right",
       labelOffset: 40,

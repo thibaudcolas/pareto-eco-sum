@@ -1,12 +1,41 @@
 // Shared loader for the Wagtail front-end scoring dataset. Parses the raw
 // full-run CSV (one row per model) into the shape used by the page and the
 // scatter script: name, provider, family, accuracy, and median-per-task
-// energy / cost / tokens / speed. CSV file lives in src/data/.
+// energy / carbon / cost / tokens / speed. The source CSV lives in src/data/.
 export function parseWagtailCsv(raw) {
-  const lines = raw.trim().split("\n");
-  const headers = lines[0].split(",");
-  return lines.slice(1).map((line) => {
-    const cells = line.split(",");
+  const parseLine = (line) => {
+    const cells = [];
+    let cell = "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        if (quoted && line[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (char === "," && !quoted) {
+        cells.push(cell.trim());
+        cell = "";
+      } else {
+        cell += char;
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
+  };
+
+  const lines = raw.trim().split(/\r?\n/);
+  const headers = parseLine(lines[0]);
+  return lines.slice(1).map((line, index) => {
+    const cells = parseLine(line);
+    if (cells.length !== headers.length) {
+      throw new Error(
+        `Wagtail CSV row ${index + 2} has ${cells.length} columns; expected ${headers.length}.`,
+      );
+    }
     const row = {};
     headers.forEach((h, i) => {
       row[h] = (cells[i] ?? "").trim();
@@ -99,6 +128,11 @@ export function csvRowsToModels(rows) {
       // Totals across all 20 tasks, for the median/total toggle. Same
       // blank-to-null convention as the medians.
       energy_wh_total: round(num(row.energy_wh_total_20), 3),
+      carbon_g_co2eq: round(num(row.carbon_g_co2eq_median_20), 3),
+      carbon_g_co2eq_total: round(num(row.carbon_g_co2eq_total_20), 3),
+      carbon_coverage: row.carbon_coverage_20 || null,
+      carbon_requests_measured: num(row.carbon_requests_measured_20),
+      carbon_request_attempts: num(row.energy_http_attempts_20),
       cost_usd_total: round(num(row.estimated_cost_usd_total_20), 4),
       tokens_total: num(row.output_tokens_total_20),
       speed_seconds_total: speedTotal == null ? null : Math.round(speedTotal),

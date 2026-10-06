@@ -42,11 +42,6 @@
   .plot-note { color: var(--muted); font-size: 0.8rem; margin-top: 0.6rem; }
   /* Plain-language one-liner describing the current X metric + aggregation. */
   .plot-title { font-size: 1rem; font-weight: 600; margin: 0.2rem 0 0.7rem; }
-  /* Short “why this metric matters” bullets under the plot note. */
-  .metric-why { color: var(--muted); font-size: 0.8rem; margin: 0.4rem 0 0;
-    padding-left: 1.1rem; }
-  .metric-why li { margin: 0.1rem 0; }
-  .metric-why strong { color: var(--text); }
   /* Table view of the same data as the scatter, on the Wagtail page. */
   .data-table-title { font-size: 1rem; margin: 1.6rem 0 0.4rem; }
   .data-table-wrap { margin-top: 1.2rem; overflow-x: auto; }
@@ -208,4 +203,3 @@
   #scatter-plot svg .plot .axis title { fill: var(--muted); }
   #scatter-plot svg .plot .tip { fill: var(--surface-2); stroke: var(--border); }
   #scatter-plot svg .plot .tip text { fill: var(--text); font-size: 0.8rem; }
-
