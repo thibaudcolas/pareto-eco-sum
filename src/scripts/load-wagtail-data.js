@@ -57,6 +57,7 @@ const PROVIDER_MATCHERS = [
   [/^anthropic\//, { provider_id: "anthropic", provider_name: "Anthropic" }],
   [/^openai\//, { provider_id: "openai", provider_name: "OpenAI" }],
   [/^google\//, { provider_id: "google", provider_name: "Google" }],
+  [/^mistral\//, { provider_id: "mistral", provider_name: "Mistral" }],
 ];
 
 // Model families for dot grouping / tooltips. Family colors match the main
@@ -70,6 +71,8 @@ function familyFor(name) {
   if (name.startsWith("GLM")) return { id: "zhipuai", name: "GLM" };
   if (name.startsWith("Kimi")) return { id: "moonshotai", name: "Kimi" };
   if (name.startsWith("Gemma")) return { id: "google", name: "Gemma" };
+  if (name.startsWith("Mistral")) return { id: "mistral", name: "Mistral" };
+  if (name.startsWith("MiMo")) return { id: "xiaomi", name: "MiMo" };
   return { id: "", name: name.split(" ")[0] };
 }
 
@@ -84,6 +87,8 @@ const FAMILY_DOMAINS = {
   zhipuai: "z.ai",
   moonshotai: "moonshot.ai",
   google: "google.com",
+  mistral: "mistral.ai",
+  xiaomi: "mi.com",
 };
 
 const num = (v) => (v === "" ? null : Number(v));
