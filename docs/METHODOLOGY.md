@@ -41,16 +41,18 @@ Neuralwatt provides measured energy per request for a small set of models at the
 
 The calibration is computed on **base models only** — excluding Neuralwatt variants with `-fast`, `-short`, or `-short-fast` suffixes. This ensures the relationship reflects the "canonical" model, not tuned variants that may have different energy/cost tradeoffs.
 
-Base models used (n=6):
+Base models used (n=8):
 
 | Model             | NW blended cost | Energy (mWh) |
 | ----------------- | ---------------: | -----------: |
-| Qwen3.6 35B       |          $0.1933 |        64.54 |
-| Gemma 4 31B       |         $0.08088 |       295.63 |
-| DeepSeek V4 Flash |          $0.0756 |       302.16 |
-| Kimi K2.7 Code    |          $0.6565 |       586.93 |
-| GLM-5.2           |          $0.8415 |      1460.00 |
-| Kimi K3           |           $2.3100 |      1900.00 |
+| Gemma 4 31B       |         $0.08088 |       187.60 |
+| DeepSeek V4.1 Flash |       $0.10050 |        97.45 |
+| GLM-5.3 Flash     |          $0.1010 |       174.45 |
+| MiMo-V2.6-Pro     |         $0.17652 |       334.01 |
+| Qwen3.6 35B       |          $0.1933 |        51.74 |
+| Qwen 3.8 27B      |          $0.5850 |       246.83 |
+| GLM 5.3           |          $0.8415 |       812.54 |
+| Kimi K3           |          $2.3100 |      1390.00 |
 
 ### Calibration results
 
@@ -61,13 +63,13 @@ k = Σ(cost × energy) / Σ(cost²)
 ```
 
 ```
-energy_mWh = 929.09 × blended_cost
-Pearson r = 0.9097
-r² = 0.8275
-n = 6
+energy_mWh = 640.34 × blended_cost
+Pearson r = 0.9524
+r² = 0.907
+n = 8
 ```
 
-The correlation is strong (r² ≈ 0.83): ~83% of the variance in energy consumption is explained by blended cost. The remaining 17% depends on model architecture, quantization, and serving infrastructure — factors not captured by price alone. The fitted k (929 mWh per blended $) sits between the per-model energy/cost ratios (334–3997 mWh/$), weighted toward the most expensive models, which contribute most to Σ(cost²).
+The correlation is strong (r² ≈ 0.91): ~91% of the variance in energy consumption is explained by blended cost. The remaining 9% depends on model architecture, quantization, and serving infrastructure — factors not captured by price alone. The fitted k (640 mWh per blended $) is pulled toward the cheap end of the range, where most of the models sit.
 
 ### What was removed, and why
 
@@ -90,9 +92,9 @@ The fitted constant and fit statistics are exported in `src/data/calibration.jso
 
 Neuralwatt reports energy per request at 7 prompt-size bands. The site data export (and the site's charts) use the **16k–64k** band as the representative value because:
 
-1. It has data for all 12 Neuralwatt models (the 256k–1M band is missing for 10/12 models).
+1. Every Neuralwatt model that reports energy reports it for this band (13/13; the 256k–1M band is missing for 6 of them).
 2. It represents a mid-range request size typical of production workloads.
-3. The cache-hit rate at this band (60–96%) reflects mature prompt caching.
+3. The cache-hit rate at this band (0–92%) reflects mature prompt caching.
 
 Other bands remain in the `neuralwatt_energy` table for future analysis.
 

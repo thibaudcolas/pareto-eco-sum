@@ -377,8 +377,6 @@ def init_db(con: duckdb.DuckDBPyConnection) -> None:
             intelligence_index_version                 DOUBLE,
             tier                                       VARCHAR,
             aa_intelligence_index                      DOUBLE,
-            aa_coding_index                            DOUBLE,
-            aa_agentic_index                           DOUBLE,
             ii_total_cost                              DOUBLE,
             ii_cost_per_task_total                     DOUBLE,
             price_1m_input_tokens                      DOUBLE,
@@ -630,8 +628,6 @@ def load_aa_models(
                 version,
                 tier,
                 evals.get("artificial_analysis_intelligence_index"),
-                evals.get("artificial_analysis_coding_index"),
-                evals.get("artificial_analysis_agentic_index"),
                 cost.get("total_cost"),
                 cpt.get("total_cost"),
                 pricing.get("price_1m_input_tokens"),
@@ -649,7 +645,7 @@ def load_aa_models(
     con.execute("DELETE FROM aa_models")
     if rows:
         con.executemany(
-            "INSERT INTO aa_models VALUES (" + ", ".join(["?"] * 22) + ")",
+            "INSERT INTO aa_models VALUES (" + ", ".join(["?"] * 20) + ")",
             rows,
         )
     con.execute(
@@ -1110,26 +1106,24 @@ def build_provider_type_map(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 
-def print_top10_agentic(con: duckdb.DuckDBPyConnection) -> None:
-    print("\nTop 10 models by Artificial Analysis Agentic Index:")
+def print_top10_intelligence(con: duckdb.DuckDBPyConnection) -> None:
+    print("\nTop 10 models by Artificial Analysis Intelligence Index:")
     rows = con.execute(
         """
-        SELECT name, model_creator_name, aa_agentic_index, aa_coding_index, aa_intelligence_index
+        SELECT name, model_creator_name, aa_intelligence_index
         FROM aa_models
-        WHERE aa_agentic_index IS NOT NULL
-        ORDER BY aa_agentic_index DESC
+        WHERE aa_intelligence_index IS NOT NULL
+        ORDER BY aa_intelligence_index DESC
         LIMIT 10
         """
     ).fetchall()
     if not rows:
-        print("  (no models with an agentic index score)")
+        print("  (no models with an intelligence index score)")
         return
-    print(f"  {'#':>2}  {'Agentic':>7}  {'Coding':>7}  {'Intel':>7}  Model (creator)")
-    print(f"  {'-' * 70}")
-    for i, (name, creator, agentic, coding, intel) in enumerate(rows, 1):
-        print(
-            f"  {i:>2}  {agentic or 0:>7.2f}  {coding or 0:>7.2f}  {intel or 0:>7.2f}  {name} ({creator})"
-        )
+    print(f"  {'#':>2}  {'Intel':>7}  Model (creator)")
+    print(f"  {'-' * 58}")
+    for i, (name, creator, intel) in enumerate(rows, 1):
+        print(f"  {i:>2}  {intel:>7.2f}  {name} ({creator})")
 
 
 
@@ -1149,8 +1143,9 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
     """
     SITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # All rows the model cards loop uses (ALL open-weight models with agentic
-    # score AND input + output pricing), ordered by agentic index DESC.
+    # All rows the model cards loop uses (ALL open-weight models with an
+    # intelligence score AND input + output pricing), ordered by intelligence
+    # index DESC.
     rows = con.execute(
         """
         SELECT
@@ -1158,8 +1153,6 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
             a.slug,
             a.model_creator_name,
             a.release_date,
-            a.aa_agentic_index,
-            a.aa_coding_index,
             a.aa_intelligence_index,
             a.price_1m_input_tokens,
             a.price_1m_output_tokens,
@@ -1185,15 +1178,15 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
             ) AS providers_offering
         FROM models_enriched a
         LEFT JOIN modelsdev_providers p ON p.id = a.modelsdev_provider_id
-        WHERE a.aa_agentic_index IS NOT NULL
+        WHERE a.aa_intelligence_index IS NOT NULL
           AND a.open_weights IS TRUE
           AND a.price_1m_input_tokens IS NOT NULL
           AND a.price_1m_output_tokens IS NOT NULL
-        ORDER BY a.aa_agentic_index DESC
+        ORDER BY a.aa_intelligence_index DESC
         """
     ).fetchall()
 
-    # Scatter data: all open-weight models that have an agentic score AND
+    # Scatter data: all open-weight models that have an intelligence score AND
     # input + output pricing. The 7:2:1 blend weights cache hits heavily; when a
     # model has no published cache-hit price, we fall back to the input price
     # (an upper bound: cache hits are at most as expensive as regular input,
@@ -1204,8 +1197,6 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
         SELECT
             a.name,
             a.model_creator_name,
-            a.aa_agentic_index,
-            a.aa_coding_index,
             a.aa_intelligence_index,
             a.price_1m_input_tokens,
             a.price_1m_output_tokens,
@@ -1254,11 +1245,11 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
             ) AS has_cache_priced_provider
         FROM models_enriched a
         LEFT JOIN modelsdev_providers p ON p.id = a.modelsdev_provider_id
-        WHERE a.aa_agentic_index IS NOT NULL
+        WHERE a.aa_intelligence_index IS NOT NULL
           AND a.open_weights IS TRUE
           AND a.price_1m_input_tokens IS NOT NULL
           AND a.price_1m_output_tokens IS NOT NULL
-        ORDER BY a.aa_agentic_index DESC
+        ORDER BY a.aa_intelligence_index DESC
         """
     ).fetchall()
 
@@ -1267,38 +1258,36 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
     scatter_data = [
         {
             "name": r[0],
-            "agentic": r[2],
-            "coding": r[3],
-            "intel": r[4],
-            "input_price": r[5],
-            "output_price": r[6],
-            "cache_hit_price": r[7],
-            "blended_cost": r[8],
-            "cost_per_task": r[9],
-            "tokens_per_second": r[10],
-            "ttft": r[11],
-            "e2e": r[12],
-            "release_date": str(r[13]) if r[13] else None,
-            "release_label": _relative_date(_parse_date(str(r[13]) if r[13] else None)),
-            "provider_id": r[14] or "",
-            "provider_name": r[15] or r[1],
-            "provider_type": _ptype_key(provider_type_map.get(r[14] or r[1], "Other")),
-            "weights_url": (r[16].split(",", 1)[0] if r[16] else None),
-            "nw_model_id": r[17],
-            "nw_input_per_million": r[18],
-            "nw_output_per_million": r[19],
-            "nw_cached_input_per_million": r[20],
-            "nw_blended_cost": r[21],
-            "nw_energy_mwh_16k_64k": r[22],
-            "nw_cache_hit_rate_16k_64k": r[23],
-            "nw_request_share_16k_64k": r[24],
-            "tool_call": r[25],
-            "reasoning": r[26],
-            "context_window": r[27],
-            "input_modalities": r[28] or "",
-            "output_modalities": r[29] or "",
-            "provider_hqs": r[30] or "",
-            "has_cache_priced_provider": bool(r[31]) if r[31] is not None else False,
+            "intel": r[2],
+            "input_price": r[3],
+            "output_price": r[4],
+            "cache_hit_price": r[5],
+            "blended_cost": r[6],
+            "cost_per_task": r[7],
+            "tokens_per_second": r[8],
+            "ttft": r[9],
+            "e2e": r[10],
+            "release_date": str(r[11]) if r[11] else None,
+            "release_label": _relative_date(_parse_date(str(r[11]) if r[11] else None)),
+            "provider_id": r[12] or "",
+            "provider_name": r[13] or r[1],
+            "provider_type": _ptype_key(provider_type_map.get(r[12] or r[1], "Other")),
+            "weights_url": (r[14].split(",", 1)[0] if r[14] else None),
+            "nw_model_id": r[15],
+            "nw_input_per_million": r[16],
+            "nw_output_per_million": r[17],
+            "nw_cached_input_per_million": r[18],
+            "nw_blended_cost": r[19],
+            "nw_energy_mwh_16k_64k": r[20],
+            "nw_cache_hit_rate_16k_64k": r[21],
+            "nw_request_share_16k_64k": r[22],
+            "tool_call": r[23],
+            "reasoning": r[24],
+            "context_window": r[25],
+            "input_modalities": r[26] or "",
+            "output_modalities": r[27] or "",
+            "provider_hqs": r[28] or "",
+            "has_cache_priced_provider": bool(r[29]) if r[29] is not None else False,
             "energy_per_req": None,
             "energy_source": None,
         }
@@ -1472,8 +1461,6 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
             slug,
             creator,
             release,
-            agentic,
-            coding,
             intel,
             p_in,
             p_out,
@@ -1521,8 +1508,6 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
                 "release_label": _relative_date(
                     _parse_date(str(release) if release else None)
                 ),
-                "agentic": agentic,
-                "coding": coding,
                 "intel": intel,
                 "blended_cost": (
                     7 * (p_cache if p_cache is not None else p_in) + 2 * p_in + p_out
@@ -1562,7 +1547,7 @@ def export_site_data(con: duckdb.DuckDBPyConnection) -> None:
         WHERE pm.slug_normalized IN (
             SELECT a.slug
             FROM models_enriched a
-            WHERE a.aa_agentic_index IS NOT NULL
+            WHERE a.aa_intelligence_index IS NOT NULL
               AND a.open_weights IS TRUE
               AND a.price_1m_input_tokens IS NOT NULL
               AND a.price_1m_output_tokens IS NOT NULL
@@ -1753,7 +1738,7 @@ def main() -> int:
             print(f"WARN: Model overrides load failed: {exc}", file=sys.stderr)
 
     # 4. Top 10 demo (console) + site data export
-    print_top10_agentic(con)
+    print_top10_intelligence(con)
     export_site_data(con)
 
     # 5. Export all tables to Parquet

@@ -6,16 +6,16 @@ Data-driven exploration of open weight AI models and providers, based on perform
 
 This project fetches, cross-references, and visualizes data about open-weight language models from four sources:
 
-1. **[Artificial Analysis](https://artificialanalysis.ai)** — benchmark scores (Intelligence, Coding, Agentic indices), pricing, and performance metrics for 643 LLMs.
-2. **[models.dev](https://models.dev)** — provider-agnostic model metadata (open weights, modalities, context window), provider catalog, and which providers offer which models (5,335 provider→model links).
-3. **[Neuralwatt](https://portal.neuralwatt.com)** — per-request energy consumption (mWh) measured from real traffic, plus Neuralwatt's own pricing, for 19 models across 7 prompt-size bands.
-4. **[OpenRouter](https://openrouter.ai)** — provider metadata (86 providers): headquarters location (ISO 3166-1 alpha-2), datacenter locations, and documentation URLs.
+1. **[Artificial Analysis](https://artificialanalysis.ai)** — Intelligence Index scores, pricing, and performance metrics for 734 LLMs (AA retired its Coding and Agentic indices in November 2026 — both fields are now always null).
+2. **[models.dev](https://models.dev)** — provider-agnostic model metadata (open weights, modalities, context window), provider catalog, and which providers offer which models (8,968 provider→model links).
+3. **[Neuralwatt](https://portal.neuralwatt.com)** — per-request energy consumption (mWh) measured from real traffic, plus Neuralwatt's own pricing, for 24 models across 7 prompt-size bands.
+4. **[OpenRouter](https://openrouter.ai)** — provider metadata (126 providers): headquarters location (ISO 3166-1 alpha-2), datacenter locations, and documentation URLs.
 
 All data is stored in a single DuckDB file (`data/pareto.duckdb`). The report is an
 [Astro](https://astro.build) site at the repo root, statically rendered from committed JSON
 snapshots in `src/data/` (exported by `fetch_models.py`) with:
 
-- **Scatter plot** of open-weight models that pass the filters (X: blended cost or energy, Y: Agentic/Coding/Intelligence index) with Observable Plot, provider-colored dots, hover tooltips, and US/China/Other location filters.
+- **Scatter plot** of open-weight models that pass the filters (X: blended cost, energy or cost per task, Y: Intelligence Index) with Observable Plot, provider-colored dots, hover tooltips, and US/China/Other location filters.
 - **Neuralwatt scatter plot** of the available Neuralwatt models (X: NW blended cost, Y: energy per request at 16k–64k band) with a proportional cost→energy calibration line and correlation statistics.
 - **Model cards** for the same open-weight models with provider logos, capability chips (reasoning, tool calling, modalities, context window), Neuralwatt energy badges, and links to every provider offering the model.
 - **Providers section** listing providers that offer those open-weight models, with favicon logos, headquarters/datacenter flags, and model counts.
@@ -81,16 +81,16 @@ Fetches the Neuralwatt API (`/v1/models`) and scrapes the energy-pricing table f
 
 | Table                       | Source              |  Rows | Notes                                                                 |
 | --------------------------- | ------------------- | ----: | --------------------------------------------------------------------- |
-| `aa_models`                 | Artificial Analysis |   511 | Evaluations, pricing, performance per model                           |
-| `modelsdev_providers`       | models.dev          |   144 | Provider metadata (id, name, api base, doc url)                       |
-| `modelsdev_models`          | models.dev          |   220 | Canonical model entries; `open_weights`, `context_window`, modalities |
-| `modelsdev_provider_models` | models.dev          | 5,335 | Junction: every (provider, model) pair from the catalog               |
-| `aa_modelsdev_matches`      | computed            |   511 | Best models.dev match per AA model                                    |
-| `neuralwatt_models`         | Neuralwatt API      |    12 | NW pricing, capabilities, limits                                      |
-| `neuralwatt_energy`         | Neuralwatt portal   |    84 | LONG format: (model, band) → energy_mwh, cache_hit_rate, req_pct      |
-| `aa_neuralwatt_matches`     | computed            |   511 | Best Neuralwatt match per AA model                                    |
-| `openrouter_providers`      | OpenRouter API      |    86 | HQ, datacenters, domain per provider                                  |
-| `models_enriched` (view)    | join                |   511 | AA + models.dev + Neuralwatt + OpenRouter all joined                  |
+| `aa_models`                 | Artificial Analysis |   734 | Evaluations, pricing, performance per model                           |
+| `modelsdev_providers`       | models.dev          |   236 | Provider metadata (id, name, api base, doc url)                       |
+| `modelsdev_models`          | models.dev          |   612 | Canonical model entries; `open_weights`, `context_window`, modalities |
+| `modelsdev_provider_models` | models.dev          | 8,968 | Junction: every (provider, model) pair from the catalog               |
+| `aa_modelsdev_matches`      | computed            |   734 | Best models.dev match per AA model                                    |
+| `neuralwatt_models`         | Neuralwatt API      |    24 | NW pricing, capabilities, limits                                      |
+| `neuralwatt_energy`         | Neuralwatt portal   |    91 | LONG format: (model, band) → energy_mwh, cache_hit_rate, req_pct      |
+| `aa_neuralwatt_matches`     | computed            |   734 | Best Neuralwatt match per AA model                                    |
+| `openrouter_providers`      | OpenRouter API      |   126 | HQ, datacenters, domain per provider                                  |
+| `models_enriched` (view)    | join                |   734 | AA + models.dev + Neuralwatt + OpenRouter all joined                  |
 | `fetch_runs`                | internal            |    31 | AA fetch audit log                                                    |
 | `fetch_runs_neuralwatt`     | internal            |     2 | Neuralwatt fetch audit log                                            |
 
@@ -106,8 +106,8 @@ builds from, so the front-end renders without any Python or database dependency.
 
 - Endpoint: `GET https://artificialanalysis.ai/api/v2/language/models/free`
 - Auth: `x-api-key` header (Free / Pro / Commercial tiers).
-- Free tier: 100 requests/day, ~200 models/page (3 pages = 3 API calls for 511 models).
-- Response: `tier`, `intelligence_index_version` (currently v4.1), `pagination`, `data[]`. Each model has `evaluations` (intelligence/coding/agentic indices), `pricing` (input/output/cache-hit/cache-write per 1M tokens), `performance` (median tokens/s, TTFT, E2E), `artificial_analysis_intelligence_index_cost` (total + cost_per_task).
+- Free tier: 100 requests/day, ~200 models/page (4 pages = 4 API calls for 734 models).
+- Response: `tier`, `intelligence_index_version` (currently v5), `pagination`, `data[]`. Each model has `evaluations` (Intelligence Index plus six capability indexes; `artificial_analysis_coding_index` and `artificial_analysis_agentic_index` are deprecated and always null), `pricing` (input/output/cache-hit/cache-write per 1M tokens), `performance` (median tokens/s, TTFT, E2E), `artificial_analysis_intelligence_index_cost` (total + cost_per_task).
 - Schema: `artificial-analysis-openapi.yaml` (`#/components/schemas/LLMModelsFreeResponse`).
 
 ### models.dev
@@ -120,7 +120,7 @@ builds from, so the front-end renders without any Python or database dependency.
 ### Neuralwatt
 
 - **API**: `GET https://api.neuralwatt.com/v1/models` (public, no auth). OpenAI-compatible `{object, data[]}` with `metadata.{display_name, pricing, capabilities, limits}`.
-- **Energy table**: `GET https://portal.neuralwatt.com/energy-pricing` (server-rendered HTML, scraped with BeautifulSoup).
+- **Energy table**: `GET https://portal.neuralwatt.com/energy-pricing?view=energy` (server-rendered HTML, scraped with BeautifulSoup). `?view=energy` is required — the default performance view carries no mWh cells.
   - 7 prompt-size bands as columns: `0–256`, `256–1k`, `1k–4k`, `4k–16k`, `16k–64k`, `64k–256k`, `256k–1M`.
   - Each cell: energy (mWh or Wh, normalized to mWh), cache-hit rate (parsed from `title` attribute), request share %. Cells with insufficient data render "—" with `title="Gathering data..."`.
 

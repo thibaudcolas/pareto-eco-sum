@@ -14,9 +14,7 @@ if (data.length) {
 
   // Metric registries: keys match the radio input values and the JSON fields.
   const METRICS = {
-    agentic: { field: "agentic", label: "Agentic Index (Artificial Analysis)" },
-    coding:  { field: "coding",  label: "Coding Index (Artificial Analysis)" },
-    intel:   { field: "intel",   label: "Intelligence Index (Artificial Analysis)" },
+    intel: { field: "intel", label: "Intelligence Index (Artificial Analysis)" },
   };
   const X_METRICS = {
     energy_per_req:  { field: "energy_per_req",  label: "Energy per request (mWh) — 16k–64k band", fmt: (d) => d + " mWh" },
@@ -27,8 +25,6 @@ if (data.length) {
   // Build a small HTML tooltip body, highlighting the active Y-metric row.
   const tipHtml = (d, activeMetric) => {
     const rows = [
-      ["Agentic", fmtNum(d.agentic, 2), "agentic"],
-      ["Coding", fmtNum(d.coding, 1), "coding"],
       ["Intelligence", fmtNum(d.intel, 1), "intel"],
       ["Energy @ 16k–64k", d.energy_per_req != null ? fmtNum(d.energy_per_req, 2) + " mWh" : "n/a"],
       ["  · cache hit", fmtMoney(d.cache_hit_price), null],
@@ -203,23 +199,13 @@ if (data.length) {
 
   }
 
-  // Track current selections.
+  // Track current selections. The Y metric is fixed: Artificial Analysis
+  // retired its Coding and Agentic indexes (both always null in the API).
+  const currentY = "intel";
   let currentX = "energy_per_req";
-  let currentY = "agentic";
 
   // Initial render.
   render(currentX, currentY);
-
-  // Wire up Y-axis metric radio buttons.
-  document.querySelectorAll('input[name="metric"]').forEach((input) => {
-    input.addEventListener("change", (e) => {
-      currentY = e.target.value;
-      document.querySelectorAll('.metric-radio:not(.x-metric)').forEach((label) => {
-        label.dataset.active = label.dataset.metric === currentY ? "true" : "false";
-      });
-      render(currentX, currentY);
-    });
-  });
 
   // Wire up X-axis metric radio buttons.
   document.querySelectorAll('input[name="xmetric"]').forEach((input) => {

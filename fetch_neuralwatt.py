@@ -12,13 +12,15 @@
 The script:
   1. Fetches GET https://api.neuralwatt.com/v1/models (JSON, public, no auth) and
      writes the response into Neuralwatt's `models` table — one row per model id.
-  2. Scrapes https://portal.neuralwatt.com/energy-pricing, locating the table
-     under the heading "Average energy per request, by model and request size".
-     The table has 7 prompt-size bands as columns (0–256, 256–1k, 1k–4k, 4k–16k,
-     16k–64k, 64k–256k, 256k–1M) and one row per model. Each cell exposes, via
-     the title attribute on the energy div, the average cache-hit rate that was
-     measured for that model in that request-size band; cells with insufficient
-     measurements render an em-dash with title "Gathering data…" instead.
+  2. Scrapes https://portal.neuralwatt.com/energy-pricing?view=energy, locating the
+     table under the heading "Price and energy by request size". The table has 7
+     prompt-size bands as columns (0–256, 256–1k, 1k–4k, 4k–16k, 16k–64k,
+     64k–256k, 256k–1M) and two rows per model: a price row followed by an
+     "Energy per request" row. Each energy cell exposes, via the title attribute,
+     the average cache-hit rate measured for that model in that request-size
+     band; cells with insufficient measurements render "Gathering data" instead.
+     The `?view=energy` pivot is required — the default performance view has no
+     energy figures.
   3. Normalizes energy values to milliWatt-hours (mWh) — values in the source
      table are typically mWh but switch to Wh once they exceed 1 Wh; those are
      multiplied by 1000.
@@ -62,12 +64,13 @@ CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "pareto.duckdb"
 
 NW_API_URL = "https://api.neuralwatt.com/v1/models"
-NW_PORTAL_URL = "https://portal.neuralwatt.com/energy-pricing"
+NW_PORTAL_URL = "https://portal.neuralwatt.com/energy-pricing?view=energy"
 
 CACHE_TTL_SECONDS = 24 * 3600
 REQUEST_TIMEOUT = 30.0
 
-TABLE_HEADING = "Average energy per request, by model and request size"
+TABLE_HEADING = "Price and energy by request size"
+ENERGY_ROW_LABEL = "Energy per request"
 
 
 # --------------------------------------------------------------------------- #
@@ -135,8 +138,12 @@ def parse_cache_hit_rate(title: str) -> float | None:
     """Extract the average cache-hit rate percentage from a title attribute."""
     if not title:
         return None
-    # "Measured at a 12% average cache-hit rate in this size band."
-    m = re.search(r"Measured at a\s+(\d+(?:\.\d+)?)%\s+average cache-hit rate", title)
+    # "Measured at a 12% average cache-hit rate in this size band." (old portal)
+    # "85% average cache hit in this size band." (current portal)
+    m = re.search(
+        r"(?:Measured at a\s+)?(\d+(?:\.\d+)?)%\s+average cache[- ]hit(?: rate)?",
+        title,
+    )
     if m:
         return float(m.group(1))
     return None
@@ -184,13 +191,21 @@ def parse_energy_table(html: str) -> tuple[list[dict[str, str]], list[dict[str, 
         body_rows_raw = table_tag.find_all("tr")[1:]
 
     rows: list[dict[str, Any]] = []
+    price_row_name: str | None = None
     for tr in body_rows_raw:
         cells = tr.find_all("td")
         if len(cells) < 2:
             continue  # skip malformed empty rows
-        # First cell = model display name.
-        model_cell = cells[0]
-        model_name = model_cell.get_text(strip=True)
+        # Each model spans two rows: a price row, then an "Energy per request" row.
+        # Only the energy row carries mWh figures; the price row only names the model.
+        label_divs = cells[0].find_all("div")
+        label = label_divs[0].get_text(" ", strip=True) if label_divs else ""
+        if label == ENERGY_ROW_LABEL:
+            model_name = price_row_name
+        else:
+            model_name = label
+            price_row_name = model_name
+            continue
         parsed_cells: list[dict[str, Any]] = []
         for band_idx, band in enumerate(bands):
             cell_idx = band_idx + 1
